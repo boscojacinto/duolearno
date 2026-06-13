@@ -1,0 +1,27 @@
+{
+  "name": "duolearno",
+  "version": "0.1.0",
+  "description": "AI learning agent that transforms PDFs into interactive lessons",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@langchain/anthropic": "^0.3.0",
+    "@langchain/core": "^0.3.0",
+    "@langchain/langgraph": "^0.2.0",
+    "commander": "^12.0.0",
+    "dotenv": "^16.4.0",
+    "pdf-parse": "^1.1.1",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/pdf-parse": "^1.1.4",
+    "tsx": "^4.0.0",
+    "typescript": "^5.5.0"
+  }
+}

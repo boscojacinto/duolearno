@@ -1,0 +1,15 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+
+# environment
+.env
+
+# input PDFs (pass via --pdf flag at runtime)
+*.pdf
+
+# generated graph outputs
+prerequisite-graph.json
+*-graph.json
