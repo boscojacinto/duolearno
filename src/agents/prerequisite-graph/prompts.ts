@@ -1,3 +1,5 @@
+const JSON_INSTRUCTION = "Respond with ONLY a valid JSON object — no markdown, no explanation, no code fences.";
+
 export const AGENT_SYSTEM_PROMPT = `You are a Learning Path Architect — an AI agent that reads educational or technical documents and produces structured prerequisite graphs mapping every concept, skill, and topic along with their dependencies.
 
 Core extraction rules:
@@ -5,7 +7,9 @@ Core extraction rules:
 - Grounded: only extract items the document teaches, references, or assumes. Never add from general knowledge.
 - Conservative edges: only add a prerequisite if B genuinely cannot be understood without A. If in doubt, omit.
 - No transitive edges: if A→B→C exists, don't add A→C unless C has a direct dependency on A beyond what B provides.
-- DAG only: no cycles. If you detect one, split the coarser item.`;
+- DAG only: no cycles. If you detect one, split the coarser item.
+
+${JSON_INSTRUCTION}`;
 
 export function buildPhase1Prompt(documentText: string, pdfTitle: string | null, pdfAuthor: string | null): string {
   const metaHint = [
@@ -31,7 +35,7 @@ ${metaHint ? `${metaHint}\n` : ""}Analyze this document and classify it:
 
 If the PDF metadata title/author above is present, use it; otherwise infer from the document text.
 
-Respond with a JSON object matching the required schema exactly.
+Return a JSON object with keys: title, author, domain, sub_domain, proficiency_band, adjacent_domains, summary.
 
 ---
 DOCUMENT TEXT:
@@ -58,9 +62,9 @@ Rules:
 - Out-of-scope mentions: if the doc says "X is beyond our scope", that's a boundary_reference — do NOT extract it here; it will be handled in Phase 3.
 - difficulty_estimate (1–10): base on conceptual complexity, abstraction level, and prerequisite count within this document.
 
-Respond with a JSON object with two arrays:
-- "items": items the document teaches (implicit: false)
-- "prerequisites_assumed": knowledge the document assumes from other domains (implicit: true)
+Return a JSON object with exactly two keys:
+- "items": array of items the document teaches. Each item: { id, label, type, description, source_location, difficulty_estimate, implicit: false }
+- "prerequisites_assumed": array of assumed prerequisites from other domains. Each: { id, label, type, description, estimated_domain, estimated_proficiency, implicit: true }
 
 ---
 DOCUMENT TEXT:
@@ -69,8 +73,7 @@ ${documentText}`;
 
 export function buildPhase3Prompt(
   items: string,
-  prerequisitesAssumed: string,
-  documentText: string
+  prerequisitesAssumed: string
 ): string {
   return `## Phase 3: Prerequisite Mapping
 
@@ -92,13 +95,11 @@ Rules:
 - Minimize transitive edges: if A→B→C already exists, don't add A→C unless C has a direct non-transitive need for A.
 - Assumed prerequisites (from the list above) may also be sources of edges into items.
 
-Also extract **boundary_references**: concepts the document explicitly places out of scope (e.g., "Fourier analysis, which is beyond our scope"). These become connection points to other learning paths.
+Also extract **boundary_references**: concepts mentioned as out of scope in the source material. Infer these from item descriptions and source_location hints.
 
-Respond with a JSON object containing "edges" and "boundary_references".
-
----
-DOCUMENT TEXT (for reference):
-${documentText}`;
+Return a JSON object with exactly two keys:
+- "edges": array of { from, to, dependency_type } objects
+- "boundary_references": array of { id, label, description, mentioned_in, estimated_domain } objects`;
 }
 
 export function buildPhase4Prompt(items: string, edges: string): string {
@@ -116,10 +117,12 @@ ${items}
 Prerequisite edges:
 ${edges}
 
-Validation before responding:
+Rules:
 - Every item ID in suggested_learning_order must appear in the items list above.
 - No item should appear before its prerequisites in suggested_learning_order.
 - Every item must appear in exactly one cluster.
 
-Respond with a JSON object containing "suggested_learning_order" (array of item IDs) and "clusters".`;
+Return a JSON object with exactly two keys:
+- "suggested_learning_order": array of item ID strings
+- "clusters": array of { cluster_id, label, item_ids, description } objects`;
 }

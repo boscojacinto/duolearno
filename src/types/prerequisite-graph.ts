@@ -10,7 +10,7 @@ export const DependencyTypeSchema = z.enum(["direct", "soft", "co-requisite"]);
 
 export const DocumentMetadataSchema = z.object({
   title: z.string(),
-  author: z.string().nullable(),
+  author: z.string().optional(),
   domain: z.string(),
   sub_domain: z.string(),
   proficiency_band: ProficiencyBandSchema,
@@ -35,7 +35,7 @@ export const AssumedPrerequisiteSchema = z.object({
   description: z.string(),
   estimated_domain: z.string(),
   estimated_proficiency: ProficiencyBandSchema,
-  implicit: z.literal(true),
+  implicit: z.boolean().default(true),
 });
 
 export const EdgeSchema = z.object({

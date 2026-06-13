@@ -18,8 +18,8 @@ program
   .option("--output <path>", "Output JSON file path", "prerequisite-graph.json")
   .option("--pretty", "Pretty-print JSON output", false)
   .action(async (options: { pdf: string; output: string; pretty: boolean }) => {
-    if (!process.env.ANTHROPIC_API_KEY) {
-      console.error("Error: ANTHROPIC_API_KEY environment variable is not set.");
+    if (!process.env.GEMINI_API_KEY) {
+      console.error("Error: GEMINI_API_KEY environment variable is not set.");
       console.error("Copy .env.example to .env and add your key.");
       process.exit(1);
     }

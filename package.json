@@ -10,13 +10,14 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@langchain/anthropic": "^0.3.0",
+    "@langchain/google-genai": "^0.1.0",
     "@langchain/core": "^0.3.0",
     "@langchain/langgraph": "^0.2.0",
     "commander": "^12.0.0",
     "dotenv": "^16.4.0",
     "pdf-parse": "^1.1.1",
-    "zod": "^3.23.0"
+    "zod": "^3.23.0",
+    "zod-to-json-schema": "^3.25.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

@@ -1,4 +1,4 @@
-import { ChatAnthropic } from "@langchain/anthropic";
+import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import { extractPdfText } from "../../tools/pdf-extractor";
 import {
   Phase1OutputSchema,
@@ -12,6 +12,7 @@ import type {
   Phase3Output,
   Phase4Output,
 } from "../../types/prerequisite-graph";
+import { toGeminiSchema } from "../../tools/gemini-schema";
 import {
   AGENT_SYSTEM_PROMPT,
   buildPhase1Prompt,
@@ -21,9 +22,10 @@ import {
 } from "./prompts";
 import type { GraphState } from "./state";
 
-const llm = new ChatAnthropic({
-  model: "claude-sonnet-4-6",
+const llm = new ChatGoogleGenerativeAI({
+  model: "gemini-3.5-flash",
   temperature: 0,
+  apiKey: process.env.GEMINI_API_KEY,
 });
 
 export async function extractPdfNode(state: GraphState): Promise<Partial<GraphState>> {
@@ -40,13 +42,11 @@ export async function extractPdfNode(state: GraphState): Promise<Partial<GraphSt
 
 export async function identifyDomainNode(state: GraphState): Promise<Partial<GraphState>> {
   console.log("[duolearno] Phase 1: Identifying domain...");
-  const structured = llm.withStructuredOutput<Phase1Output>(Phase1OutputSchema, { name: "domain_analysis" });
-
-  const result = await structured.invoke([
+  const structured = llm.withStructuredOutput(toGeminiSchema(Phase1OutputSchema), { name: "domain_analysis" });
+  const result = (await structured.invoke([
     { role: "system", content: AGENT_SYSTEM_PROMPT },
     { role: "user", content: buildPhase1Prompt(state.extractedText, state.pdfTitle, state.pdfAuthor) },
-  ]);
-
+  ])) as Phase1Output;
   console.log(`[duolearno]   Domain: ${result.domain} › ${result.sub_domain} (${result.proficiency_band})`);
   return { documentMetadata: result };
 }
@@ -55,11 +55,9 @@ export async function extractConceptsNode(state: GraphState): Promise<Partial<Gr
   if (!state.documentMetadata) {
     return { errors: ["Phase 2 skipped: domain metadata missing."] };
   }
-
   console.log("[duolearno] Phase 2: Extracting concepts, skills, vocabulary...");
-  const structured = llm.withStructuredOutput<Phase2Output>(Phase2OutputSchema, { name: "concept_extraction" });
-
-  const result = await structured.invoke([
+  const structured = llm.withStructuredOutput(toGeminiSchema(Phase2OutputSchema), { name: "concept_extraction" });
+  const result = (await structured.invoke([
     { role: "system", content: AGENT_SYSTEM_PROMPT },
     {
       role: "user",
@@ -68,11 +66,8 @@ export async function extractConceptsNode(state: GraphState): Promise<Partial<Gr
         JSON.stringify(state.documentMetadata, null, 2)
       ),
     },
-  ]);
-
-  console.log(
-    `[duolearno]   Items: ${result.items.length} extracted, ${result.prerequisites_assumed.length} assumed prerequisites`
-  );
+  ])) as Phase2Output;
+  console.log(`[duolearno]   Items: ${result.items.length} extracted, ${result.prerequisites_assumed.length} assumed prerequisites`);
   return {
     items: result.items,
     prerequisitesAssumed: result.prerequisites_assumed,
@@ -81,23 +76,18 @@ export async function extractConceptsNode(state: GraphState): Promise<Partial<Gr
 
 export async function buildPrerequisiteGraphNode(state: GraphState): Promise<Partial<GraphState>> {
   console.log("[duolearno] Phase 3: Building prerequisite graph...");
-  const structured = llm.withStructuredOutput<Phase3Output>(Phase3OutputSchema, { name: "prerequisite_mapping" });
-
-  const result = await structured.invoke([
+  const structured = llm.withStructuredOutput(toGeminiSchema(Phase3OutputSchema), { name: "prerequisite_mapping" });
+  const result = (await structured.invoke([
     { role: "system", content: AGENT_SYSTEM_PROMPT },
     {
       role: "user",
       content: buildPhase3Prompt(
         JSON.stringify(state.items, null, 2),
-        JSON.stringify(state.prerequisitesAssumed, null, 2),
-        state.extractedText
+        JSON.stringify(state.prerequisitesAssumed, null, 2)
       ),
     },
-  ]);
-
-  console.log(
-    `[duolearno]   Edges: ${result.edges.length}, boundary references: ${result.boundary_references.length}`
-  );
+  ])) as Phase3Output;
+  console.log(`[duolearno]   Edges: ${result.edges.length}, boundary references: ${result.boundary_references.length}`);
   return {
     edges: result.edges,
     boundaryReferences: result.boundary_references,
@@ -108,11 +98,9 @@ export async function formatOutputNode(state: GraphState): Promise<Partial<Graph
   if (!state.documentMetadata) {
     return { errors: ["Phase 4 skipped: document metadata missing."] };
   }
-
   console.log("[duolearno] Phase 4: Computing learning order and clusters...");
-  const structured = llm.withStructuredOutput<Phase4Output>(Phase4OutputSchema, { name: "final_output" });
-
-  const result = await structured.invoke([
+  const structured = llm.withStructuredOutput(toGeminiSchema(Phase4OutputSchema), { name: "final_output" });
+  const result = (await structured.invoke([
     { role: "system", content: AGENT_SYSTEM_PROMPT },
     {
       role: "user",
@@ -121,21 +109,18 @@ export async function formatOutputNode(state: GraphState): Promise<Partial<Graph
         JSON.stringify(state.edges, null, 2)
       ),
     },
-  ]);
+  ])) as Phase4Output;
+  console.log(`[duolearno]   Clusters: ${result.clusters.length}, learning order: ${result.suggested_learning_order.length} steps`);
 
-  console.log(
-    `[duolearno]   Clusters: ${result.clusters.length}, learning order: ${result.suggested_learning_order.length} steps`
-  );
-
-  const finalOutput = {
-    document_metadata: state.documentMetadata,
-    items: state.items,
-    prerequisites_assumed: state.prerequisitesAssumed,
-    edges: state.edges,
-    boundary_references: state.boundaryReferences,
-    suggested_learning_order: result.suggested_learning_order,
-    clusters: result.clusters,
+  return {
+    finalOutput: {
+      document_metadata: state.documentMetadata,
+      items: state.items,
+      prerequisites_assumed: state.prerequisitesAssumed,
+      edges: state.edges,
+      boundary_references: state.boundaryReferences,
+      suggested_learning_order: result.suggested_learning_order,
+      clusters: result.clusters,
+    },
   };
-
-  return { finalOutput };
 }
