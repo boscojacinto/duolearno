@@ -23,7 +23,7 @@ import {
 import type { GraphState } from "./state";
 
 const llm = new ChatGoogleGenerativeAI({
-  model: "gemini-3.5-flash",
+  model: "gemini-2.5-flash",
   temperature: 0,
   apiKey: process.env.GEMINI_API_KEY,
 });
