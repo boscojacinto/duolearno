@@ -45,7 +45,7 @@ export async function extractPdfNode(state: GraphState): Promise<Partial<GraphSt
 }
 
 export async function identifyDomainNode(state: GraphState): Promise<Partial<GraphState>> {
-  console.log("[duolearno] Phase 1: Identifying domain...");
+  console.log("[duolearno] Step 1: Identifying domain...");
   const structured = llm.withStructuredOutput(toGeminiSchema(Phase1OutputSchema), { name: "domain_analysis" });
   const result = (await structured.invoke([
     { role: "system", content: AGENT_SYSTEM_PROMPT },
@@ -59,7 +59,7 @@ export async function extractConceptsNode(state: GraphState): Promise<Partial<Gr
   if (!state.documentMetadata) {
     return { errors: ["Phase 2 skipped: domain metadata missing."] };
   }
-  console.log("[duolearno] Phase 2: Extracting concepts, skills, vocabulary...");
+  console.log("[duolearno] Step 2: Extracting concepts, skills, vocabulary...");
   const structured = llm.withStructuredOutput(toGeminiSchema(Phase2OutputSchema), { name: "concept_extraction" });
   const result = (await structured.invoke([
     { role: "system", content: AGENT_SYSTEM_PROMPT },
@@ -79,7 +79,7 @@ export async function extractConceptsNode(state: GraphState): Promise<Partial<Gr
 }
 
 export async function buildPrerequisiteGraphNode(state: GraphState): Promise<Partial<GraphState>> {
-  console.log("[duolearno] Phase 3: Building prerequisite graph...");
+  console.log("[duolearno] Step 3: Building prerequisite graph...");
   const structured = llm.withStructuredOutput(toGeminiSchema(Phase3OutputSchema), { name: "prerequisite_mapping" });
   const result = (await structured.invoke([
     { role: "system", content: AGENT_SYSTEM_PROMPT },
@@ -102,7 +102,7 @@ export async function formatOutputNode(state: GraphState): Promise<Partial<Graph
   if (!state.documentMetadata) {
     return { errors: ["Phase 4 skipped: document metadata missing."] };
   }
-  console.log("[duolearno] Phase 4: Computing learning order and clusters...");
+  console.log("[duolearno] Step 4: Computing learning order and clusters...");
   const structured = llm.withStructuredOutput(toGeminiSchema(Phase4OutputSchema), { name: "final_output" });
   const result = (await structured.invoke([
     { role: "system", content: AGENT_SYSTEM_PROMPT },
@@ -133,7 +133,7 @@ export async function generateLearningPathNode(state: GraphState): Promise<Parti
   if (!state.finalOutput) {
     return { errors: ["Phase 5 skipped: finalOutput missing."] };
   }
-  console.log("[duolearno] Phase 5: Generating learning path...");
+  console.log("[duolearno] Step 5: Generating learning path...");
 
   const { document_metadata, items, clusters, suggested_learning_order, prerequisites_assumed } = state.finalOutput;
 

@@ -19,7 +19,7 @@ export function buildPhase1Prompt(documentText: string, pdfTitle: string | null,
     .filter(Boolean)
     .join("\n");
 
-  return `## Phase 1: Domain Identification
+  return `## Step 1: Domain Identification
 
 ${metaHint ? `${metaHint}\n` : ""}Analyze this document and classify it:
 
@@ -43,7 +43,7 @@ ${documentText}`;
 }
 
 export function buildPhase2Prompt(documentText: string, domainContext: string): string {
-  return `## Phase 2: Concept Extraction
+  return `## Step 2: Concept Extraction
 
 Domain context from Phase 1:
 ${domainContext}
@@ -75,7 +75,7 @@ export function buildPhase3Prompt(
   items: string,
   prerequisitesAssumed: string
 ): string {
-  return `## Phase 3: Prerequisite Mapping
+  return `## Step 3: Prerequisite Mapping
 
 Build directed edges representing prerequisite relationships. An edge from A → B means "A must be understood before B."
 
@@ -103,7 +103,7 @@ Return a JSON object with exactly two keys:
 }
 
 export function buildPhase4Prompt(items: string, edges: string): string {
-  return `## Phase 4: Learning Order & Clustering
+  return `## Step 4: Learning Order & Clustering
 
 Given the items and prerequisite edges below, produce:
 
@@ -145,7 +145,7 @@ export function buildPhase5Prompt(
         .join("\n") + "\n\n"
     : "";
 
-  return `## Phase 5: Learning Path Generation
+  return `## Step 5: Learning Path Generation
 
 ${levelOverride}Generate a structured, sequenced learning path from the prerequisite graph below. Your output must be a concrete guide a learner can follow from their starting competency to the document's target competency.
 

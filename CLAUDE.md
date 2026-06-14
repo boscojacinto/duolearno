@@ -4,38 +4,40 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-DuoLearno is an AI learning agent that transforms a PDF into an interactive lesson. It is built in phases; this repo currently contains **Phase 1: PDF ingestion, analysis, and prerequisite graph builder**.
+DuoLearno is an AI learning agent that transforms a PDF into an interactive lesson. It is built in phases; this repo currently contains **Phase 1: PDF ingestion, analysis, prerequisite graph builder, and learning path generator**.
 
 ## Commands
 
 ```bash
 npm install          # install dependencies
 npm run dev -- analyze --pdf path/to/doc.pdf --output out.json --pretty
+npm run dev -- analyze --pdf path/to/doc.pdf --from "no prior knowledge" --to "intermediate practitioner" --pretty
 npm run build        # compile to dist/
 npm run typecheck    # type-check without emitting
 ```
 
-Requires `.env` with `ANTHROPIC_API_KEY` (see `.env.example`).
+Requires `.env` with `GEMINI_API_KEY` (see `.env.example`).
 
 ## Architecture
 
-### Phase 1: Prerequisite Graph Agent
+### Phase 1: Prerequisite Graph + Learning Path Agent
 
-A 5-node LangGraph pipeline that processes a PDF into a structured prerequisite graph (JSON).
+A 6-node LangGraph pipeline that processes a PDF into a structured prerequisite graph and sequenced learning path (JSON).
 
 ```
-extract_pdf → identify_domain → extract_concepts → build_graph → format_output
+extract_pdf → identify_domain → extract_concepts → build_graph → format_output → generate_learning_path
 ```
 
 | Node | What it does |
 |------|-------------|
 | `extract_pdf` | Reads PDF bytes via `pdf-parse`, returns raw text + page count |
-| `identify_domain` | LLM call — domain, sub-domain, proficiency band, summary (Phase 1 of system prompt) |
-| `extract_concepts` | LLM call — atomic items (concept/skill/principle/vocabulary) + assumed prerequisites (Phase 2) |
-| `build_graph` | LLM call — directed prerequisite edges + boundary references (Phase 3) |
-| `format_output` | LLM call — topological learning order + thematic clusters, assembles final JSON (Phase 4) |
+| `identify_domain` | LLM call — domain, sub-domain, proficiency band, summary (Step 1) |
+| `extract_concepts` | LLM call — atomic items (concept/skill/principle/vocabulary) + assumed prerequisites (Step 2) |
+| `build_graph` | LLM call — directed prerequisite edges + boundary references (Step 3) |
+| `format_output` | LLM call — topological learning order + thematic clusters (Step 4) |
+| `generate_learning_path` | LLM call — sequenced modules with objectives, time estimates, and milestones (Step 5) |
 
-Each LLM call uses `ChatAnthropic.withStructuredOutput(ZodSchema)` (tool-use under the hood) so outputs are validated at runtime.
+Each LLM call uses `ChatGoogleGenerativeAI.withStructuredOutput(GeminiSchema)` so outputs are validated at runtime.
 
 ### Key files
 
