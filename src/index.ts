@@ -5,6 +5,9 @@ import readline from "readline";
 import { Command } from "commander";
 import { Command as LangGraphCommand } from "@langchain/langgraph";
 import { buildPrerequisiteGraphAgent } from "./agents/prerequisite-graph/graph";
+import { buildLearningLoopAgent } from "./agents/learning-loop/graph";
+import type { ModuleResult } from "./types/learning-loop";
+import type { LearningPath, DocumentMetadata, Item } from "./types/prerequisite-graph";
 
 async function promptUser(question: string): Promise<string> {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -18,6 +21,33 @@ async function promptUser(question: string): Promise<string> {
 
 async function drainStream(stream: AsyncIterable<unknown>): Promise<void> {
   for await (const _chunk of stream) { /* consume */ }
+}
+
+function printFinalSummary(moduleResults: ModuleResult[], learningPath: LearningPath): void {
+  const hr = "═".repeat(58);
+  const totalQ = moduleResults.reduce((s, m) => s + m.total_questions, 0);
+  const totalC = moduleResults.reduce((s, m) => s + m.correct_answers, 0);
+  const pct = totalQ > 0 ? Math.round((totalC / totalQ) * 100) : 0;
+
+  console.log(`\n${hr}`);
+  console.log(`  SESSION COMPLETE — ${learningPath.title}`);
+  console.log(hr);
+  console.log(`\n  Overall score: ${totalC}/${totalQ} (${pct}%)\n`);
+  console.log("  Results by module:");
+  for (const mod of moduleResults) {
+    const modPct = Math.round((mod.correct_answers / mod.total_questions) * 100);
+    const bar = modPct >= 80 ? "✓" : modPct >= 50 ? "~" : "✗";
+    console.log(`    ${bar}  ${mod.module_id}. ${mod.module_title} — ${mod.correct_answers}/${mod.total_questions} (${modPct}%)`);
+  }
+
+  if (pct >= 80) {
+    console.log("\n  Great work! You have a solid grasp of this material.");
+  } else if (pct >= 50) {
+    console.log("\n  Good effort. Review the modules where you scored below 80%.");
+  } else {
+    console.log("\n  Keep at it. Re-read the source material and try again.");
+  }
+  console.log(`\n${hr}\n`);
 }
 
 const program = new Command();
@@ -133,6 +163,95 @@ program
       console.log(`  Total study time : ${result.learningPath.total_estimated_minutes} min`);
     }
     console.log(`  Output           : ${outputPath}`);
+  });
+
+program
+  .command("learn")
+  .description("Interactive quiz loop over the modules in an analyze output")
+  .requiredOption("--input <path>", "Path to the analyze output JSON")
+  .action(async (options: { input: string }) => {
+    if (!process.env.GEMINI_API_KEY) {
+      console.error("Error: GEMINI_API_KEY environment variable is not set.");
+      process.exit(1);
+    }
+
+    const inputPath = path.resolve(options.input);
+    if (!fs.existsSync(inputPath)) {
+      console.error(`Error: Input file not found at ${inputPath}`);
+      process.exit(1);
+    }
+
+    let rawJson: Record<string, unknown>;
+    try {
+      rawJson = JSON.parse(fs.readFileSync(inputPath, "utf-8"));
+    } catch {
+      console.error("Error: Failed to parse input JSON.");
+      process.exit(1);
+    }
+
+    const learningPath = rawJson.learning_path as LearningPath | undefined;
+    const items = rawJson.items as Item[] | undefined;
+    const documentMetadata = rawJson.document_metadata as DocumentMetadata | undefined;
+
+    if (!learningPath?.modules?.length || !items || !documentMetadata) {
+      console.error("Error: Input JSON is missing learning_path, items, or document_metadata.");
+      console.error("Run `analyze` first to generate this file.");
+      process.exit(1);
+    }
+
+    const hr = "─".repeat(58);
+    console.log(`\n${hr}`);
+    console.log(`  ${learningPath.title}`);
+    console.log(hr);
+    console.log(`  Modules   : ${learningPath.modules.length}`);
+    console.log(`  Study time: ~${learningPath.total_estimated_minutes} min`);
+    console.log(`  From      : ${learningPath.from_level}`);
+    console.log(`  To        : ${learningPath.to_level}`);
+    console.log(`${hr}\n`);
+
+    const agent = buildLearningLoopAgent();
+    const threadId = `learn-${Date.now()}`;
+    const config = { configurable: { thread_id: threadId } };
+
+    // Initial run: generate first module's MCQs, then interrupt at first question
+    await drainStream(
+      await agent.stream(
+        { learningPath, items, documentMetadata },
+        { ...config, streamMode: "updates" }
+      )
+    );
+
+    type TaskWithInterrupts = { interrupts?: Array<{ value: unknown }> };
+
+    // Quiz loop: handle one interrupt (question) per iteration
+    while (true) {
+      const snap = await agent.getState(config);
+      const pendingInterrupts = (snap.tasks as TaskWithInterrupts[]).flatMap(
+        (t) => t.interrupts ?? []
+      );
+
+      if (pendingInterrupts.length === 0) break;
+
+      const questionText = pendingInterrupts[0].value as string;
+      process.stdout.write(questionText);
+      const answer = await promptUser("  Your answer (A/B/C/D): ");
+
+      await drainStream(
+        await agent.stream(new LangGraphCommand({ resume: answer }), {
+          ...config,
+          streamMode: "updates",
+        })
+      );
+    }
+
+    // Print session summary
+    const finalSnap = await agent.getState(config);
+    const finalState = finalSnap.values as {
+      moduleResults: ModuleResult[];
+      learningPath: LearningPath;
+    };
+
+    printFinalSummary(finalState.moduleResults, finalState.learningPath);
   });
 
 program.parse(process.argv);
