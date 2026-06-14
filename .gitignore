@@ -4,6 +4,18 @@ node_modules/
 # build output
 dist/
 
+# Next.js
+.next/
+next-env.d.ts
+
+# TypeScript build cache
+*.tsbuildinfo
+
+# Claude Code / agent tooling (local-only)
+.claude/
+.agents/
+skills-lock.json
+
 # environment
 .env
 

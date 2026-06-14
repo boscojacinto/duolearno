@@ -28,7 +28,7 @@ import {
 } from "./prompts";
 
 const googleAI = createGoogleGenerativeAI({ apiKey: process.env.GEMINI_API_KEY! });
-const gemini = googleAI("gemini-2.5-flash");
+const gemini = googleAI("gemini-3.1-flash-lite");
 
 // ── Accumulated pass-through schemas ────────────────────────────────────────
 
