@@ -47,6 +47,13 @@ export default function Page() {
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // The present_question render closure can capture stale state (quizData is
+  // null at mount), so expose live values via refs the closure reads at call time.
+  const sessionIdRef = useRef("");
+  sessionIdRef.current = quizData?.sessionId ?? "";
+  const currentModuleRef = useRef<string | null>(null);
+  currentModuleRef.current = currentModule;
+
   // Share quiz data with the CopilotKit agent
   useAgentContext({
     description: "Current quiz session: sessionId for MCQ generation, and learningPath with modules to quiz on",
@@ -81,8 +88,9 @@ export default function Page() {
           correct_index={args.correct_index}
           explanation={args.explanation}
           active={status === "executing"}
-          currentModule={currentModule}
+          currentModule={currentModuleRef.current}
           onActivate={setCurrentModule}
+          sessionId={sessionIdRef.current}
           respond={respond}
         />
       );

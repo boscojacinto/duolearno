@@ -1,6 +1,6 @@
 import { createStep } from "@mastra/core/workflows";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
-import { generateObject } from "ai";
+import { generateObject, generateText } from "ai";
 import { z } from "zod";
 import {
   LearningPathSchema,
@@ -14,8 +14,15 @@ import {
   ModuleResultSchema,
 } from "../../types/learning-loop";
 import type { MCQ, MCQSet, QuestionResult, ModuleResult } from "../../types/learning-loop";
-import type { LearningPath, Item, DocumentMetadata } from "../../types/prerequisite-graph";
-import { MCQ_SYSTEM_PROMPT, buildMCQPrompt } from "./prompts";
+import type {
+  LearningPath,
+  LearningModule,
+  Item,
+  Edge,
+  AssumedPrerequisite,
+  DocumentMetadata,
+} from "../../types/prerequisite-graph";
+import { MCQ_SYSTEM_PROMPT, buildMCQPrompt, HINT_SYSTEM_PROMPT, buildHintPrompt } from "./prompts";
 
 const googleAI = createGoogleGenerativeAI({ apiKey: process.env.GEMINI_API_KEY! });
 const gemini = googleAI("gemini-3.1-flash-lite");
@@ -112,6 +119,71 @@ export async function generateMcqs(
   });
 
   return (object as MCQSet).questions;
+}
+
+// ── Graph-grounded hint generation (learn phase) ─────────────────────────────
+
+const LETTERS = ["A", "B", "C", "D"];
+
+/**
+ * Generate the next hint for a wrongly-answered question. Hints are built on the
+ * prerequisite graph from the analyze phase: the question's module concepts and
+ * the concepts they depend on (resolved via prerequisite edges) are fed to the
+ * model so each hint leans on foundations the learner should already know —
+ * without ever revealing the answer.
+ */
+export async function generateHint(params: {
+  question: string;
+  options: string[];
+  correctIndex: number;
+  module: LearningModule | undefined;
+  items: Item[];
+  edges: Edge[];
+  assumedPrerequisites?: AssumedPrerequisite[];
+  previousHints?: string[];
+}): Promise<string> {
+  const { question, options, correctIndex, module, items, edges, assumedPrerequisites = [], previousHints = [] } = params;
+
+  // Concepts this question's module covers.
+  const moduleItemIds = new Set(module?.item_ids ?? []);
+  const testedItems = items.filter((it) => moduleItemIds.has(it.id));
+
+  // Prerequisites: an edge A → B means A must be understood before B, so the
+  // prerequisites of a tested concept are the `from` ends of edges into it.
+  const prereqIds = new Set<string>();
+  for (const edge of edges) {
+    if (moduleItemIds.has(edge.to) && !moduleItemIds.has(edge.from)) prereqIds.add(edge.from);
+  }
+  const itemById = new Map(items.map((it) => [it.id, it] as const));
+  const assumedById = new Map(assumedPrerequisites.map((a) => [a.id, a] as const));
+  const prereqLines: string[] = [];
+  for (const id of prereqIds) {
+    const it = itemById.get(id);
+    if (it) prereqLines.push(`- ${it.label}: ${it.description}`);
+    else {
+      const a = assumedById.get(id);
+      if (a) prereqLines.push(`- ${a.label} (assumed): ${a.description}`);
+    }
+  }
+
+  const testedConcepts = testedItems.map((it) => `- [${it.type}] ${it.label}: ${it.description}`).join("\n");
+  const optionsLabeled = options.map((o, i) => `${LETTERS[i]}) ${o}`).join("\n");
+
+  const { text } = await generateText({
+    model: gemini,
+    system: HINT_SYSTEM_PROMPT,
+    prompt: buildHintPrompt({
+      question,
+      optionsLabeled,
+      moduleTitle: module?.title ?? "this module",
+      testedConcepts,
+      prerequisiteConcepts: prereqLines.join("\n"),
+      correctLabel: LETTERS[correctIndex] ?? "?",
+      previousHints,
+    }),
+  });
+
+  return text.trim();
 }
 
 // ── Steps ────────────────────────────────────────────────────────────────────

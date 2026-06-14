@@ -39,6 +39,9 @@ export async function POST(request: NextRequest) {
     quizSessions.set(sessionId, {
       items: output.finalOutput.items,
       documentMetadata: output.finalOutput.document_metadata,
+      edges: output.finalOutput.edges,
+      assumedPrerequisites: output.finalOutput.prerequisites_assumed,
+      learningPath: output.learningPath,
     });
 
     return NextResponse.json({
