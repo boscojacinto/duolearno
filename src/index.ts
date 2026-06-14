@@ -13,11 +13,13 @@ program
 
 program
   .command("analyze")
-  .description("Analyze a PDF and generate a prerequisite graph")
+  .description("Analyze a PDF and generate a prerequisite graph with learning path")
   .requiredOption("--pdf <path>", "Path to the PDF file")
   .option("--output <path>", "Output JSON file path", "prerequisite-graph.json")
   .option("--pretty", "Pretty-print JSON output", false)
-  .action(async (options: { pdf: string; output: string; pretty: boolean }) => {
+  .option("--from <level>", "Override learner starting level (free text)")
+  .option("--to <level>", "Override learner target level (free text)")
+  .action(async (options: { pdf: string; output: string; pretty: boolean; from?: string; to?: string }) => {
     if (!process.env.GEMINI_API_KEY) {
       console.error("Error: GEMINI_API_KEY environment variable is not set.");
       console.error("Copy .env.example to .env and add your key.");
@@ -36,7 +38,11 @@ program
     const start = Date.now();
 
     const agent = buildPrerequisiteGraphAgent();
-    const result = await agent.invoke({ pdfPath });
+    const result = await agent.invoke({
+      pdfPath,
+      fromLevel: options.from ?? "",
+      toLevel: options.to ?? "",
+    });
 
     if (result.errors.length > 0) {
       console.warn("[duolearno] Warnings:", result.errors);
@@ -47,18 +53,24 @@ program
       process.exit(1);
     }
 
+    const fullOutput = { ...result.finalOutput, learning_path: result.learningPath };
+
     const json = options.pretty
-      ? JSON.stringify(result.finalOutput, null, 2)
-      : JSON.stringify(result.finalOutput);
+      ? JSON.stringify(fullOutput, null, 2)
+      : JSON.stringify(fullOutput);
 
     fs.writeFileSync(outputPath, json, "utf-8");
 
     const elapsed = ((Date.now() - start) / 1000).toFixed(1);
     console.log(`\n[duolearno] Done in ${elapsed}s`);
-    console.log(`  Items extracted : ${result.finalOutput.items.length}`);
+    console.log(`  Items extracted  : ${result.finalOutput.items.length}`);
     console.log(`  Prerequisite edges: ${result.finalOutput.edges.length}`);
-    console.log(`  Clusters        : ${result.finalOutput.clusters.length}`);
-    console.log(`  Output          : ${outputPath}`);
+    console.log(`  Clusters         : ${result.finalOutput.clusters.length}`);
+    if (result.learningPath) {
+      console.log(`  Learning modules : ${result.learningPath.modules.length}`);
+      console.log(`  Total study time : ${result.learningPath.total_estimated_minutes} min`);
+    }
+    console.log(`  Output           : ${outputPath}`);
   });
 
 program.parse(process.argv);

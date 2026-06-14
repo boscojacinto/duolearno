@@ -60,6 +60,28 @@ export const ClusterSchema = z.object({
   description: z.string(),
 });
 
+export const LearningModuleSchema = z.object({
+  module_id: z.string(),
+  title: z.string(),
+  cluster_id: z.string(),
+  learning_objectives: z.array(z.string()),
+  item_ids: z.array(z.string()),
+  estimated_minutes: z.number().int(),
+  is_milestone: z.boolean(),
+  milestone_description: z.string(),
+});
+
+export const LearningPathSchema = z.object({
+  title: z.string(),
+  from_level: z.string(),
+  to_level: z.string(),
+  total_estimated_minutes: z.number().int(),
+  prerequisites_summary: z.string(),
+  modules: z.array(LearningModuleSchema),
+});
+
+export const Phase5OutputSchema = LearningPathSchema;
+
 // ── Per-phase output schemas ─────────────────────────────────────────────────
 
 export const Phase1OutputSchema = DocumentMetadataSchema;
@@ -99,8 +121,11 @@ export type AssumedPrerequisite = z.infer<typeof AssumedPrerequisiteSchema>;
 export type Edge = z.infer<typeof EdgeSchema>;
 export type BoundaryReference = z.infer<typeof BoundaryReferenceSchema>;
 export type Cluster = z.infer<typeof ClusterSchema>;
+export type LearningModule = z.infer<typeof LearningModuleSchema>;
+export type LearningPath = z.infer<typeof LearningPathSchema>;
 export type PrerequisiteGraph = z.infer<typeof PrerequisiteGraphSchema>;
 export type Phase1Output = z.infer<typeof Phase1OutputSchema>;
 export type Phase2Output = z.infer<typeof Phase2OutputSchema>;
 export type Phase3Output = z.infer<typeof Phase3OutputSchema>;
 export type Phase4Output = z.infer<typeof Phase4OutputSchema>;
+export type Phase5Output = z.infer<typeof Phase5OutputSchema>;

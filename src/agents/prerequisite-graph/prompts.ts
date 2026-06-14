@@ -126,3 +126,65 @@ Return a JSON object with exactly two keys:
 - "suggested_learning_order": array of item ID strings
 - "clusters": array of { cluster_id, label, item_ids, description } objects`;
 }
+
+export function buildPhase5Prompt(
+  documentMetadata: string,
+  items: string,
+  clusters: string,
+  suggestedLearningOrder: string,
+  prerequisitesAssumed: string,
+  fromLevelHint: string,
+  toLevelHint: string,
+): string {
+  const levelOverride = (fromLevelHint || toLevelHint)
+    ? [
+        fromLevelHint ? `The learner's starting level is: ${fromLevelHint}` : null,
+        toLevelHint   ? `The learner's target level is: ${toLevelHint}`    : null,
+      ]
+        .filter(Boolean)
+        .join("\n") + "\n\n"
+    : "";
+
+  return `## Phase 5: Learning Path Generation
+
+${levelOverride}Generate a structured, sequenced learning path from the prerequisite graph below. Your output must be a concrete guide a learner can follow from their starting competency to the document's target competency.
+
+### Document Metadata
+${documentMetadata}
+
+### Assumed Prerequisites (entry bar)
+${prerequisitesAssumed}
+
+### Extracted Items (concepts / skills / principles / vocabulary)
+${items}
+
+### Thematic Clusters (natural lesson groupings, pre-sorted in topological order)
+${clusters}
+
+### Suggested Learning Order (topologically sorted item IDs)
+${suggestedLearningOrder}
+
+### Instructions
+
+**title**: Write a learner-facing title for this learning path (e.g., "Introduction to MRI Physics for Neuroimagers").
+
+**from_level**: Describe the assumed starting competency in plain language. Synthesise it from the prerequisites_assumed list above. If a hint was provided above, use it verbatim.
+
+**to_level**: Describe what the learner will be able to do after completing every module. Derive it from the domain, sub_domain, and proficiency_band. If a hint was provided above, use it verbatim.
+
+**prerequisites_summary**: A 2–3 sentence paragraph shown to learners before they start, listing the assumed prerequisite knowledge and explaining why it matters.
+
+**modules**: One module per cluster, in the order the clusters appear above. For each module:
+- module_id: use the cluster_id exactly as-is.
+- title: a learner-facing title (can equal the cluster label or be more descriptive).
+- cluster_id: copy the cluster_id exactly.
+- learning_objectives: 3–5 strings starting with an action verb (e.g., "Explain the role of the B0 field", "Calculate Larmor frequency given field strength"). Each objective maps to items in this cluster.
+- item_ids: copy the cluster's item_ids exactly — do not reorder or omit.
+- estimated_minutes: estimate study time. Use 15 minutes per item as your baseline, then adjust upward if the average difficulty_estimate for items in this cluster is above 6, or downward if below 3. Round to the nearest 5 minutes.
+- is_milestone: set to true if this module concludes a major conceptual arc or is a gatekeeper for a large subsequent cluster. Aim for 2–3 milestones across the whole path.
+- milestone_description: if is_milestone is true, one sentence describing the competency achieved. If is_milestone is false, write an empty string "".
+
+**total_estimated_minutes**: sum of all module estimated_minutes.
+
+Preserve all IDs exactly as they appear in the input.`;
+}

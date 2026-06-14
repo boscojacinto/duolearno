@@ -5,12 +5,15 @@ import {
   Phase2OutputSchema,
   Phase3OutputSchema,
   Phase4OutputSchema,
+  Phase5OutputSchema,
 } from "../../types/prerequisite-graph";
 import type {
   Phase1Output,
   Phase2Output,
   Phase3Output,
   Phase4Output,
+  Phase5Output,
+  LearningModule,
 } from "../../types/prerequisite-graph";
 import { toGeminiSchema } from "../../tools/gemini-schema";
 import {
@@ -19,6 +22,7 @@ import {
   buildPhase2Prompt,
   buildPhase3Prompt,
   buildPhase4Prompt,
+  buildPhase5Prompt,
 } from "./prompts";
 import type { GraphState } from "./state";
 
@@ -123,4 +127,45 @@ export async function formatOutputNode(state: GraphState): Promise<Partial<Graph
       clusters: result.clusters,
     },
   };
+}
+
+export async function generateLearningPathNode(state: GraphState): Promise<Partial<GraphState>> {
+  if (!state.finalOutput) {
+    return { errors: ["Phase 5 skipped: finalOutput missing."] };
+  }
+  console.log("[duolearno] Phase 5: Generating learning path...");
+
+  const { document_metadata, items, clusters, suggested_learning_order, prerequisites_assumed } = state.finalOutput;
+
+  const orderedClusters = [...clusters].sort((a, b) => {
+    const aIdx = Math.min(...a.item_ids.map(id => suggested_learning_order.indexOf(id)).filter(i => i >= 0));
+    const bIdx = Math.min(...b.item_ids.map(id => suggested_learning_order.indexOf(id)).filter(i => i >= 0));
+    return aIdx - bIdx;
+  });
+
+  const trimmedItems = items.map(({ id, label, type, difficulty_estimate, description }) => ({
+    id, label, type, difficulty_estimate, description,
+  }));
+
+  const structured = llm.withStructuredOutput(toGeminiSchema(Phase5OutputSchema), { name: "learning_path" });
+  const result = (await structured.invoke([
+    { role: "system", content: AGENT_SYSTEM_PROMPT },
+    {
+      role: "user",
+      content: buildPhase5Prompt(
+        JSON.stringify(document_metadata, null, 2),
+        JSON.stringify(trimmedItems, null, 2),
+        JSON.stringify(orderedClusters, null, 2),
+        JSON.stringify(suggested_learning_order, null, 2),
+        JSON.stringify(prerequisites_assumed, null, 2),
+        state.fromLevel,
+        state.toLevel,
+      ),
+    },
+  ])) as Phase5Output;
+
+  result.total_estimated_minutes = result.modules.reduce((s: number, m: LearningModule) => s + m.estimated_minutes, 0);
+  console.log(`[duolearno]   Modules: ${result.modules.length}, total: ${result.total_estimated_minutes} min`);
+
+  return { learningPath: result };
 }

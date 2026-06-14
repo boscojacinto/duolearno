@@ -6,6 +6,7 @@ import type {
   Edge,
   BoundaryReference,
   PrerequisiteGraph,
+  LearningPath,
 } from "../../types/prerequisite-graph";
 
 export const GraphStateAnnotation = Annotation.Root({
@@ -48,6 +49,18 @@ export const GraphStateAnnotation = Annotation.Root({
   boundaryReferences: Annotation<BoundaryReference[]>({
     reducer: (_, b) => b,
     default: () => [],
+  }),
+  fromLevel: Annotation<string>({
+    reducer: (_, b) => b,
+    default: () => "",
+  }),
+  toLevel: Annotation<string>({
+    reducer: (_, b) => b,
+    default: () => "",
+  }),
+  learningPath: Annotation<LearningPath | null>({
+    reducer: (_, b) => b,
+    default: () => null,
   }),
   finalOutput: Annotation<PrerequisiteGraph | null>({
     reducer: (_, b) => b,
