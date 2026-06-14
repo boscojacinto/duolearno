@@ -18,7 +18,7 @@ import type { LearningPath, Item, DocumentMetadata } from "../../types/prerequis
 import { MCQ_SYSTEM_PROMPT, buildMCQPrompt } from "./prompts";
 
 const googleAI = createGoogleGenerativeAI({ apiKey: process.env.GEMINI_API_KEY! });
-const gemini = googleAI("gemini-2.5-flash-latest");
+const gemini = googleAI("gemini-3.1-flash-lite");
 
 const LABELS = ["A", "B", "C", "D"];
 
@@ -36,6 +36,20 @@ export const QuizStateSchema = z.object({
 });
 
 export type QuizState = z.infer<typeof QuizStateSchema>;
+
+// Mastra validates the initial workflow state against QuizStateSchema at
+// run.start(); supply a fully-populated empty state so validation passes. The
+// `init-quiz` step immediately overwrites these with real values from inputData.
+export const EMPTY_QUIZ_STATE: QuizState = {
+  learningPath: null,
+  items: [],
+  documentMetadata: null,
+  currentModuleIndex: 0,
+  currentQuestionIndex: 0,
+  currentMcqs: [],
+  currentModuleQuestionResults: [],
+  moduleResults: [],
+};
 
 // ── I/O schemas ──────────────────────────────────────────────────────────────
 
@@ -70,7 +84,7 @@ function formatQuestion(mcq: MCQ, index: number, total: number, moduleTitle: str
   ].join("\n");
 }
 
-async function generateMcqs(
+export async function generateMcqs(
   module: LearningPath["modules"][number],
   items: Item[],
   documentMetadata: DocumentMetadata

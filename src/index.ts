@@ -1,3 +1,4 @@
+import "./crypto-polyfill";
 import "dotenv/config";
 import fs from "fs";
 import path from "path";
@@ -7,6 +8,7 @@ import { mastra } from "./mastra";
 import type { z } from "zod";
 import type { AnalyzeOutputSchema } from "./agents/analyze/steps";
 import type { LearnOutputSchema } from "./agents/learn/steps";
+import { EMPTY_QUIZ_STATE } from "./agents/learn/steps";
 import type { ModuleResult } from "./types/learning-loop";
 import type { LearningPath, DocumentMetadata, Item } from "./types/prerequisite-graph";
 
@@ -105,7 +107,9 @@ program
       if (result.status === "suspended") {
         let answer: string;
         if (options.hitl) {
-          const summary = (result.suspendPayload as { summary: string }).summary;
+          // suspendPayload is keyed by step ID: { "human-approval": { summary } }
+          const stepPayload = (result.suspendPayload as Record<string, { summary?: string }>)["human-approval"];
+          const summary = stepPayload?.summary ?? "";
           process.stdout.write(summary);
           answer = await promptUser("  Approve this plan? [y/n]: ");
         } else {
@@ -212,10 +216,13 @@ program
 
     let result = await run.start({
       inputData: { learningPath, items, documentMetadata },
+      initialState: EMPTY_QUIZ_STATE,
     });
 
     while (result.status === "suspended") {
-      const { questionText } = result.suspendPayload as { questionText: string };
+      // suspendPayload is keyed by step ID: { "quiz": { questionText } }
+      const stepPayload = (result.suspendPayload as Record<string, { questionText?: string }>)["quiz"];
+      const { questionText = "" } = stepPayload ?? {};
       process.stdout.write(questionText);
       const answer = await promptUser("  Your answer (A/B/C/D): ");
 

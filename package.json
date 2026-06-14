@@ -5,17 +5,26 @@
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx src/index.ts",
-    "build": "tsc",
+    "dev:web": "next dev",
+    "build": "tsc -p tsconfig.cli.json",
+    "build:web": "next build",
     "start": "node dist/index.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit -p tsconfig.cli.json"
   },
   "dependencies": {
     "@ai-sdk/google": "^1.0.0",
+    "@copilotkit/react-core": "^1.60.1",
+    "@copilotkit/runtime": "^1.60.1",
     "@mastra/core": "^1.42.0",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
     "ai": "^4.0.0",
     "commander": "^12.0.0",
     "dotenv": "^16.4.0",
+    "next": "^14.2.35",
     "pdf-parse": "^1.1.1",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
     "zod": "^3.23.0"
   },
   "devDependencies": {
