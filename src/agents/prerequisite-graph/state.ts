@@ -70,6 +70,14 @@ export const GraphStateAnnotation = Annotation.Root({
     reducer: (a, b) => [...a, ...b],
     default: () => [],
   }),
+  approvalStatus: Annotation<"pending" | "approved" | "rejected">({
+    reducer: (_, b) => b,
+    default: () => "pending",
+  }),
+  userFeedback: Annotation<string>({
+    reducer: (_, b) => b,
+    default: () => "",
+  }),
 });
 
 export type GraphState = typeof GraphStateAnnotation.State;

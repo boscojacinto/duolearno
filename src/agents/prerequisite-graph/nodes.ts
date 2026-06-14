@@ -1,4 +1,5 @@
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
+import { interrupt } from "@langchain/langgraph";
 import { extractPdfText } from "../../tools/pdf-extractor";
 import {
   Phase1OutputSchema,
@@ -168,4 +169,57 @@ export async function generateLearningPathNode(state: GraphState): Promise<Parti
   console.log(`[duolearno]   Modules: ${result.modules.length}, total: ${result.total_estimated_minutes} min`);
 
   return { learningPath: result };
+}
+
+function formatPlanSummary(state: GraphState): string {
+  const meta = state.documentMetadata;
+  const lp = state.learningPath;
+  if (!meta || !lp) return "(plan unavailable)";
+
+  const hr = "─".repeat(56);
+  const lines: string[] = [
+    "",
+    hr,
+    "  LEARNING PLAN SUMMARY",
+    hr,
+    "",
+    `  Document   : ${meta.title}`,
+    `  Domain     : ${meta.domain} › ${meta.sub_domain}`,
+    `  Level band : ${meta.proficiency_band}`,
+    `  From → To  : ${lp.from_level || "no prior knowledge"} → ${lp.to_level || "practitioner"}`,
+    `  Study time : ~${lp.total_estimated_minutes} min across ${lp.modules.length} module${lp.modules.length !== 1 ? "s" : ""}`,
+    "",
+    "  MODULES:",
+  ];
+
+  for (const mod of lp.modules) {
+    const milestone = mod.is_milestone ? " ✦ milestone" : "";
+    lines.push(`    ${mod.module_id}. ${mod.title} (${mod.estimated_minutes} min)${milestone}`);
+    if (mod.learning_objectives.length > 0) {
+      lines.push(`       ↳ ${mod.learning_objectives[0]}`);
+    }
+  }
+
+  if (state.prerequisitesAssumed.length > 0) {
+    const prereqLabels = state.prerequisitesAssumed.slice(0, 5).map((p) => p.label).join(", ");
+    const more = state.prerequisitesAssumed.length > 5 ? ` (+${state.prerequisitesAssumed.length - 5} more)` : "";
+    lines.push("", `  Prerequisites assumed: ${prereqLabels}${more}`);
+  }
+
+  lines.push("", hr, "");
+  return lines.join("\n");
+}
+
+export async function humanApprovalNode(state: GraphState): Promise<Partial<GraphState>> {
+  const summary = formatPlanSummary(state);
+  const response = interrupt(summary) as string;
+
+  const normalized = response.trim().toLowerCase();
+  if (normalized === "y" || normalized === "yes" || normalized === "approve" || normalized === "ok") {
+    console.log("[duolearno] Plan approved.");
+    return { approvalStatus: "approved" };
+  }
+
+  console.log("[duolearno] Plan rejected.");
+  return { approvalStatus: "rejected", userFeedback: response.trim() };
 }
