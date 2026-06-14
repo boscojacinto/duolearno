@@ -17,6 +17,8 @@ interface MCQCardProps {
   currentModule: string | null;
   /** Notify the page which module is active. */
   onActivate: (moduleTitle: string) => void;
+  /** Quiz session id — lets the hint endpoint load the prerequisite graph. */
+  sessionId: string;
   /** Defined only while active; resolves the human-in-the-loop call. */
   respond?: (result: { answer: string }) => void;
 }
@@ -53,6 +55,7 @@ export default function MCQCard({
   active,
   currentModule,
   onActivate,
+  sessionId,
   respond,
 }: MCQCardProps) {
   const [selected, setSelected] = useState<number | null>(null);
@@ -88,13 +91,12 @@ export default function MCQCard({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          sessionId,
+          moduleTitle,
           question,
           options,
           correct_index,
-          explanation,
-          moduleTitle,
           previousHints: hints,
-          attempts: triedWrong.length,
         }),
       });
       const data = await res.json();
