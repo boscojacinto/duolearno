@@ -23,46 +23,49 @@ Requires `.env` with `GEMINI_API_KEY` (see `.env.example`).
 
 ## Architecture
 
-### Phase 1 + 2: Prerequisite Graph + Learning Path Agent with HITL Approval
+The project uses **Mastra** (`@mastra/core`) for workflow orchestration and the **Vercel AI SDK** (`ai`, `@ai-sdk/google`) for LLM calls with structured output.
 
-A 7-node LangGraph pipeline that processes a PDF into a structured prerequisite graph and sequenced learning path, then pauses for user approval before writing output.
+### Phase 1 + 2: Analyze Workflow (HITL)
+
+A 7-step Mastra workflow that processes a PDF into a structured prerequisite graph and sequenced learning path, then suspends for user approval before writing output.
 
 ```
-extract_pdf → identify_domain → extract_concepts → build_graph → format_output → generate_learning_path → human_approval
+extract-pdf → identify-domain → extract-concepts → build-graph → format-output → generate-learning-path → human-approval [suspend]
 ```
 
-| Node | What it does |
+| Step | What it does |
 |------|-------------|
-| `extract_pdf` | Reads PDF bytes via `pdf-parse`, returns raw text + page count |
-| `identify_domain` | LLM call — domain, sub-domain, proficiency band, summary (Step 1) |
-| `extract_concepts` | LLM call — atomic items (concept/skill/principle/vocabulary) + assumed prerequisites (Step 2) |
-| `build_graph` | LLM call — directed prerequisite edges + boundary references (Step 3) |
-| `format_output` | LLM call — topological learning order + thematic clusters (Step 4) |
-| `generate_learning_path` | LLM call — sequenced modules with objectives, time estimates, and milestones (Step 5) |
-| `human_approval` | **HITL** — calls `interrupt()` to pause; CLI displays plan summary and reads y/n from stdin; resumes via `Command({ resume })` |
+| `extract-pdf` | Reads PDF bytes via `pdf-parse`, returns raw text + page count |
+| `identify-domain` | LLM call — domain, sub-domain, proficiency band, summary (Step 1) |
+| `extract-concepts` | LLM call — atomic items (concept/skill/principle/vocabulary) + assumed prerequisites (Step 2) |
+| `build-graph` | LLM call — directed prerequisite edges + boundary references (Step 3) |
+| `format-output` | LLM call — topological learning order + thematic clusters (Step 4) |
+| `generate-learning-path` | LLM call — sequenced modules with objectives, time estimates, and milestones (Step 5) |
+| `human-approval` | **HITL** — calls `suspend({ summary })` to pause; CLI prints summary and reads y/n; resumes via `run.resume({ step, resumeData: { answer } })` |
 
-Each LLM call uses `ChatGoogleGenerativeAI.withStructuredOutput(GeminiSchema)` so outputs are validated at runtime.
+Each LLM call uses `generateObject()` from the Vercel AI SDK with a Zod schema for runtime validation.
 
-**HITL flow**: The graph compiles with a `MemorySaver` checkpointer. The CLI streams the graph until the interrupt fires, calls `agent.getState()` to read the interrupt value (formatted plan summary), prompts the user, then resumes with `agent.stream(new Command({ resume: answer }))`. If the user types `n`, `approvalStatus` is set to `"rejected"` and no file is written.
+**Data flow**: Steps use a pass-through accumulated schema pattern — each step's `outputSchema` extends the previous step's `outputSchema` with its new fields. No shared state is needed for the analyze workflow.
 
-### Phase 3: Learning Loop
+**HITL flow**: The CLI calls `run.start()`, checks `result.status === 'suspended'`, reads `result.suspendPayload.summary`, prompts the user, then calls `run.resume({ step: 'human-approval', resumeData: { answer } })`. If the user types `n`, `approvalStatus` is `"rejected"` and no file is written.
 
-A 3-node LangGraph loop that quizzes the user on every module from the Phase 1+2 output. It accepts the analyze output JSON as input (`--input`).
+### Phase 3: Learn Workflow (Quiz Loop)
+
+A Mastra workflow with a `dountil` loop that quizzes the user on every module. It accepts the analyze output JSON as input (`--input`).
 
 ```
-generate_mcqs → present_question [interrupt] → evaluate_answer
-     ↑ (next_module) ←──────────────────────────────────┘
-          ↑ (next_question) ←────── present_question ←──┘
-                                                    done → END
+init-quiz → [dountil: quiz (suspend per question)] → summary
 ```
 
-| Node | What it does |
+| Step | What it does |
 |------|-------------|
-| `generate_mcqs` | LLM call — generates 3–6 MCQs for the current module (scales with number of learning objectives) |
-| `present_question` | Calls `interrupt()` with the formatted question; resumes with the user's A/B/C/D answer |
-| `evaluate_answer` | Grades the answer, prints feedback + explanation inline; routes to `next_question`, `next_module`, or `done` |
+| `init-quiz` | Initialises quiz state via `setState` (module index, question index, MCQ arrays, results) |
+| `quiz` | On first call: generates MCQs if needed, formats question, calls `suspend({ questionText })`; on resume: evaluates answer, updates state, returns `{ done }` |
+| `summary` | Reads `moduleResults` and `learningPath` from shared state; returns them as workflow output |
 
-**Loop flow**: After each module finishes, a score summary is printed inline. After all modules complete, the CLI reads final state and prints an overall session summary with per-module scores.
+**Loop flow**: The `dountil` condition exits when `quiz` returns `{ done: true }` (all modules complete). Each iteration = one question (suspend + resume). The CLI loops on `result.status === 'suspended'`, printing the question and reading the user's A/B/C/D input, then calls `run.resume({ step: 'quiz', resumeData: { answer } })`.
+
+**State pattern**: The learn workflow uses `stateSchema` (`QuizStateSchema`) to persist quiz progress across `dountil` iterations and across suspensions. All quiz steps declare the same `stateSchema`.
 
 **MCQ format**: Each MCQ has `question`, 4 `options` (plain strings), `correct_index` (0–3), and `explanation`. The question count per module is `min(6, len(learning_objectives) + 1)`, minimum 3.
 
@@ -70,21 +73,29 @@ generate_mcqs → present_question [interrupt] → evaluate_answer
 
 - `src/types/prerequisite-graph.ts` — Zod schemas and TypeScript types for all data structures; single source of truth for the analyze output JSON shape.
 - `src/types/learning-loop.ts` — MCQ, QuestionResult, ModuleResult schemas and types.
-- `src/agents/prerequisite-graph/prompts.ts` — All LLM prompt builders for Phase 1+2; edit here to tune extraction quality.
-- `src/agents/prerequisite-graph/nodes.ts` — One async function per graph node; each returns `Partial<GraphState>`.
-- `src/agents/prerequisite-graph/state.ts` — LangGraph `Annotation.Root` state definition (camelCase keys; Zod schemas use snake_case to match output JSON).
-- `src/agents/prerequisite-graph/graph.ts` — Wires Phase 1+2 nodes into the `StateGraph` and compiles it.
-- `src/agents/learning-loop/prompts.ts` — MCQ generation prompt builder.
-- `src/agents/learning-loop/nodes.ts` — `generateMcqsNode`, `presentQuestionNode`, `evaluateAnswerNode`, and `routeAfterEvaluate`.
-- `src/agents/learning-loop/state.ts` — LangGraph state for the learning loop agent.
-- `src/agents/learning-loop/graph.ts` — Wires Phase 3 nodes into the `StateGraph` and compiles it.
+- `src/agents/analyze/prompts.ts` — All LLM prompt builders for Phase 1+2; edit here to tune extraction quality.
+- `src/agents/analyze/steps.ts` — Seven `createStep` definitions; accumulated pass-through schemas; `humanApprovalStep` with `suspendSchema`/`resumeSchema`.
+- `src/agents/analyze/workflow.ts` — Wires the 7 analyze steps with `.then()` chain and `.commit()`.
+- `src/agents/learn/prompts.ts` — MCQ generation prompt builder.
+- `src/agents/learn/steps.ts` — `initQuizStep`, `quizStep` (suspend/resume + evaluation), `summaryStep`; `QuizStateSchema` shared state.
+- `src/agents/learn/workflow.ts` — Wires learn steps: `.then(init).dountil(quiz, condition).then(summary).commit()`.
+- `src/mastra.ts` — `Mastra` instance registering both workflows.
 - `src/tools/pdf-extractor.ts` — Thin wrapper around `pdf-parse`; returns text, page count, and PDF metadata.
 - `src/index.ts` — `commander` CLI entry point (`analyze` and `learn` commands).
 
-### State key naming
+### LLM integration
 
-Graph state uses **camelCase** (`prerequisitesAssumed`, `boundaryReferences`). The output JSON and Zod schemas use **snake_case** (`prerequisites_assumed`, `boundary_references`) to match the specification.
+All LLM calls use:
+```typescript
+import { createGoogleGenerativeAI } from '@ai-sdk/google'
+import { generateObject } from 'ai'
+
+const googleAI = createGoogleGenerativeAI({ apiKey: process.env.GEMINI_API_KEY! })
+const gemini = googleAI('gemini-2.5-flash')
+
+const { object } = await generateObject({ model: gemini, schema: ZodSchema, system, prompt })
+```
 
 ### Planned additions
 
-Redis (LangGraph checkpointing) and PostgreSQL (persistent storage) will be added in later phases. The `MemorySaver` in both `graph.ts` files will be swapped for a Redis/Postgres checkpointer at the same `compile({ checkpointer })` call site.
+PostgreSQL (Mastra persistent storage) will replace the default in-memory state in later phases, enabling persistent run history and resumable sessions across process restarts.

@@ -3,9 +3,10 @@ import fs from "fs";
 import path from "path";
 import readline from "readline";
 import { Command } from "commander";
-import { Command as LangGraphCommand } from "@langchain/langgraph";
-import { buildPrerequisiteGraphAgent } from "./agents/prerequisite-graph/graph";
-import { buildLearningLoopAgent } from "./agents/learning-loop/graph";
+import { mastra } from "./mastra";
+import type { z } from "zod";
+import type { AnalyzeOutputSchema } from "./agents/analyze/steps";
+import type { LearnOutputSchema } from "./agents/learn/steps";
 import type { ModuleResult } from "./types/learning-loop";
 import type { LearningPath, DocumentMetadata, Item } from "./types/prerequisite-graph";
 
@@ -17,10 +18,6 @@ async function promptUser(question: string): Promise<string> {
       resolve(answer);
     });
   });
-}
-
-async function drainStream(stream: AsyncIterable<unknown>): Promise<void> {
-  for await (const _chunk of stream) { /* consume */ }
 }
 
 function printFinalSummary(moduleResults: ModuleResult[], learningPath: LearningPath): void {
@@ -37,7 +34,9 @@ function printFinalSummary(moduleResults: ModuleResult[], learningPath: Learning
   for (const mod of moduleResults) {
     const modPct = Math.round((mod.correct_answers / mod.total_questions) * 100);
     const bar = modPct >= 80 ? "✓" : modPct >= 50 ? "~" : "✗";
-    console.log(`    ${bar}  ${mod.module_id}. ${mod.module_title} — ${mod.correct_answers}/${mod.total_questions} (${modPct}%)`);
+    console.log(
+      `    ${bar}  ${mod.module_id}. ${mod.module_title} — ${mod.correct_answers}/${mod.total_questions} (${modPct}%)`
+    );
   }
 
   if (pct >= 80) {
@@ -66,104 +65,103 @@ program
   .option("--from <level>", "Override learner starting level (free text)")
   .option("--to <level>", "Override learner target level (free text)")
   .option("--no-hitl", "Skip the human approval step and write output immediately")
-  .action(async (options: { pdf: string; output: string; pretty: boolean; from?: string; to?: string; hitl: boolean }) => {
-    if (!process.env.GEMINI_API_KEY) {
-      console.error("Error: GEMINI_API_KEY environment variable is not set.");
-      console.error("Copy .env.example to .env and add your key.");
-      process.exit(1);
+  .action(
+    async (options: {
+      pdf: string;
+      output: string;
+      pretty: boolean;
+      from?: string;
+      to?: string;
+      hitl: boolean;
+    }) => {
+      if (!process.env.GEMINI_API_KEY) {
+        console.error("Error: GEMINI_API_KEY environment variable is not set.");
+        console.error("Copy .env.example to .env and add your key.");
+        process.exit(1);
+      }
+
+      const pdfPath = path.resolve(options.pdf);
+      const outputPath = path.resolve(options.output);
+
+      if (!fs.existsSync(pdfPath)) {
+        console.error(`Error: PDF not found at ${pdfPath}`);
+        process.exit(1);
+      }
+
+      console.log(`[duolearno] Analyzing: ${path.basename(pdfPath)}`);
+      const start = Date.now();
+
+      const workflow = mastra.getWorkflow("analyzeWorkflow");
+      const run = await workflow.createRun();
+
+      let result = await run.start({
+        inputData: {
+          pdfPath,
+          fromLevel: options.from ?? "",
+          toLevel: options.to ?? "",
+        },
+      });
+
+      if (result.status === "suspended") {
+        let answer: string;
+        if (options.hitl) {
+          const summary = (result.suspendPayload as { summary: string }).summary;
+          process.stdout.write(summary);
+          answer = await promptUser("  Approve this plan? [y/n]: ");
+        } else {
+          answer = "yes";
+        }
+
+        result = await run.resume({
+          step: "human-approval",
+          resumeData: { answer },
+        });
+      }
+
+      if (result.status === "failed") {
+        console.error("[duolearno] Error:", result.error.message);
+        process.exit(1);
+      }
+
+      if (result.status !== "success") {
+        console.error(`[duolearno] Unexpected status: ${result.status}`);
+        process.exit(1);
+      }
+
+      const { approvalStatus, userFeedback, finalOutput, learningPath, errors } =
+        result.result as z.infer<typeof AnalyzeOutputSchema>;
+
+      if (errors.length > 0) {
+        console.warn("[duolearno] Warnings:", errors);
+      }
+
+      if (approvalStatus === "rejected") {
+        console.log("\n[duolearno] Plan rejected — no output written.");
+        if (userFeedback) console.log(`  Feedback: ${userFeedback}`);
+        process.exit(0);
+      }
+
+      if (!finalOutput) {
+        console.error("[duolearno] Error: No output was generated.");
+        process.exit(1);
+      }
+
+      const fullOutput = { ...finalOutput, learning_path: learningPath };
+      const json = options.pretty ? JSON.stringify(fullOutput, null, 2) : JSON.stringify(fullOutput);
+      fs.writeFileSync(outputPath, json, "utf-8");
+
+      const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+      console.log(`\n[duolearno] Done in ${elapsed}s`);
+      console.log(`  Items extracted  : ${finalOutput.items.length}`);
+      console.log(`  Prerequisite edges: ${finalOutput.edges.length}`);
+      console.log(`  Clusters         : ${finalOutput.clusters.length}`);
+      if (learningPath) {
+        console.log(`  Learning modules : ${learningPath.modules.length}`);
+        console.log(`  Total study time : ${learningPath.total_estimated_minutes} min`);
+      }
+      console.log(`  Output           : ${outputPath}`);
     }
-
-    const pdfPath = path.resolve(options.pdf);
-    const outputPath = path.resolve(options.output);
-
-    if (!fs.existsSync(pdfPath)) {
-      console.error(`Error: PDF not found at ${pdfPath}`);
-      process.exit(1);
-    }
-
-    console.log(`[duolearno] Analyzing: ${path.basename(pdfPath)}`);
-    const start = Date.now();
-
-    const agent = buildPrerequisiteGraphAgent();
-    const threadId = `session-${Date.now()}`;
-    const config = { configurable: { thread_id: threadId } };
-
-    // Run Phase 1–5; the graph pauses at human_approval via interrupt()
-    await drainStream(
-      await agent.stream(
-        { pdfPath, fromLevel: options.from ?? "", toLevel: options.to ?? "" },
-        { ...config, streamMode: "updates" }
-      )
-    );
-
-    // Check for a pending interrupt from the human_approval node
-    const snap = await agent.getState(config);
-    type TaskWithInterrupts = { interrupts?: Array<{ value: unknown }> };
-    const pendingInterrupts = (snap.tasks as TaskWithInterrupts[])
-      .flatMap((t) => t.interrupts ?? []);
-
-    if (pendingInterrupts.length > 0) {
-      const answer = options.hitl
-        ? await (async () => {
-            const planSummary = pendingInterrupts[0].value as string;
-            process.stdout.write(planSummary);
-            return promptUser("  Approve this plan? [y/n]: ");
-          })()
-        : "yes";
-
-      // Resume the graph with the user's answer (or auto-approve)
-      await drainStream(
-        await agent.stream(new LangGraphCommand({ resume: answer }), {
-          ...config,
-          streamMode: "updates",
-        })
-      );
-    }
-
-    // Read the completed state
-    const finalSnap = await agent.getState(config);
-    const result = finalSnap.values as {
-      errors: string[];
-      approvalStatus: "pending" | "approved" | "rejected";
-      userFeedback: string;
-      finalOutput: { items: unknown[]; edges: unknown[]; clusters: unknown[] } | null;
-      learningPath: { modules: unknown[]; total_estimated_minutes: number } | null;
-    };
-
-    if (result.errors.length > 0) {
-      console.warn("[duolearno] Warnings:", result.errors);
-    }
-
-    if (result.approvalStatus === "rejected") {
-      console.log("\n[duolearno] Plan rejected — no output written.");
-      if (result.userFeedback) console.log(`  Feedback: ${result.userFeedback}`);
-      process.exit(0);
-    }
-
-    if (!result.finalOutput) {
-      console.error("[duolearno] Error: No output was generated.");
-      process.exit(1);
-    }
-
-    const fullOutput = { ...result.finalOutput, learning_path: result.learningPath };
-
-    const json = options.pretty
-      ? JSON.stringify(fullOutput, null, 2)
-      : JSON.stringify(fullOutput);
-
-    fs.writeFileSync(outputPath, json, "utf-8");
-
-    const elapsed = ((Date.now() - start) / 1000).toFixed(1);
-    console.log(`\n[duolearno] Done in ${elapsed}s`);
-    console.log(`  Items extracted  : ${result.finalOutput.items.length}`);
-    console.log(`  Prerequisite edges: ${result.finalOutput.edges.length}`);
-    console.log(`  Clusters         : ${result.finalOutput.clusters.length}`);
-    if (result.learningPath) {
-      console.log(`  Learning modules : ${result.learningPath.modules.length}`);
-      console.log(`  Total study time : ${result.learningPath.total_estimated_minutes} min`);
-    }
-    console.log(`  Output           : ${outputPath}`);
-  });
+  );
 
 program
   .command("learn")
@@ -209,49 +207,36 @@ program
     console.log(`  To        : ${learningPath.to_level}`);
     console.log(`${hr}\n`);
 
-    const agent = buildLearningLoopAgent();
-    const threadId = `learn-${Date.now()}`;
-    const config = { configurable: { thread_id: threadId } };
+    const workflow = mastra.getWorkflow("learnWorkflow");
+    const run = await workflow.createRun();
 
-    // Initial run: generate first module's MCQs, then interrupt at first question
-    await drainStream(
-      await agent.stream(
-        { learningPath, items, documentMetadata },
-        { ...config, streamMode: "updates" }
-      )
-    );
+    let result = await run.start({
+      inputData: { learningPath, items, documentMetadata },
+    });
 
-    type TaskWithInterrupts = { interrupts?: Array<{ value: unknown }> };
-
-    // Quiz loop: handle one interrupt (question) per iteration
-    while (true) {
-      const snap = await agent.getState(config);
-      const pendingInterrupts = (snap.tasks as TaskWithInterrupts[]).flatMap(
-        (t) => t.interrupts ?? []
-      );
-
-      if (pendingInterrupts.length === 0) break;
-
-      const questionText = pendingInterrupts[0].value as string;
+    while (result.status === "suspended") {
+      const { questionText } = result.suspendPayload as { questionText: string };
       process.stdout.write(questionText);
       const answer = await promptUser("  Your answer (A/B/C/D): ");
 
-      await drainStream(
-        await agent.stream(new LangGraphCommand({ resume: answer }), {
-          ...config,
-          streamMode: "updates",
-        })
-      );
+      result = await run.resume({
+        step: "quiz",
+        resumeData: { answer },
+      });
     }
 
-    // Print session summary
-    const finalSnap = await agent.getState(config);
-    const finalState = finalSnap.values as {
-      moduleResults: ModuleResult[];
-      learningPath: LearningPath;
-    };
+    if (result.status === "failed") {
+      console.error("[duolearno] Error:", result.error.message);
+      process.exit(1);
+    }
 
-    printFinalSummary(finalState.moduleResults, finalState.learningPath);
+    if (result.status !== "success") {
+      console.error(`[duolearno] Unexpected status: ${result.status}`);
+      process.exit(1);
+    }
+
+    const learnResult = result.result as z.infer<typeof LearnOutputSchema>;
+    printFinalSummary(learnResult.moduleResults, learnResult.learningPath);
   });
 
 program.parse(process.argv);
