@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-DuoLearno is an AI learning agent that transforms a PDF into an interactive lesson. It is built in phases; this repo currently contains **Phase 1: PDF ingestion, analysis, prerequisite graph builder, and learning path generator**.
+DuoLearno is an AI learning agent that transforms a PDF into an interactive lesson. It is built in phases; this repo currently contains **Phase 1 (analysis + learning path) and Phase 2 (HITL approval gate)**.
 
 ## Commands
 
@@ -20,12 +20,12 @@ Requires `.env` with `GEMINI_API_KEY` (see `.env.example`).
 
 ## Architecture
 
-### Phase 1: Prerequisite Graph + Learning Path Agent
+### Phase 1 + 2: Prerequisite Graph + Learning Path Agent with HITL Approval
 
-A 6-node LangGraph pipeline that processes a PDF into a structured prerequisite graph and sequenced learning path (JSON).
+A 7-node LangGraph pipeline that processes a PDF into a structured prerequisite graph and sequenced learning path, then pauses for user approval before writing output.
 
 ```
-extract_pdf → identify_domain → extract_concepts → build_graph → format_output → generate_learning_path
+extract_pdf → identify_domain → extract_concepts → build_graph → format_output → generate_learning_path → human_approval
 ```
 
 | Node | What it does |
@@ -36,8 +36,11 @@ extract_pdf → identify_domain → extract_concepts → build_graph → format_
 | `build_graph` | LLM call — directed prerequisite edges + boundary references (Step 3) |
 | `format_output` | LLM call — topological learning order + thematic clusters (Step 4) |
 | `generate_learning_path` | LLM call — sequenced modules with objectives, time estimates, and milestones (Step 5) |
+| `human_approval` | **HITL** — calls `interrupt()` to pause; CLI displays plan summary and reads y/n from stdin; resumes via `Command({ resume })` |
 
 Each LLM call uses `ChatGoogleGenerativeAI.withStructuredOutput(GeminiSchema)` so outputs are validated at runtime.
+
+**HITL flow**: The graph compiles with a `MemorySaver` checkpointer. The CLI streams the graph until the interrupt fires, calls `agent.getState()` to read the interrupt value (formatted plan summary), prompts the user, then resumes with `agent.stream(new Command({ resume: answer }))`. If the user types `n`, `approvalStatus` is set to `"rejected"` and no file is written.
 
 ### Key files
 
@@ -55,4 +58,4 @@ Graph state uses **camelCase** (`prerequisitesAssumed`, `boundaryReferences`). T
 
 ### Planned additions
 
-Redis (LangGraph checkpointing) and PostgreSQL (persistent storage) will be added in later phases. The `workflow.compile()` call in `graph.ts` accepts a `checkpointer` argument — that's where the Redis/Postgres checkpointer will be wired in.
+Redis (LangGraph checkpointing) and PostgreSQL (persistent storage) will be added in later phases. The `MemorySaver` in `graph.ts` will be swapped for a Redis/Postgres checkpointer at the same `compile({ checkpointer })` call site.
