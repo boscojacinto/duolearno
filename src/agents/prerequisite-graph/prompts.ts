@@ -175,7 +175,7 @@ ${suggestedLearningOrder}
 **prerequisites_summary**: A 2–3 sentence paragraph shown to learners before they start, listing the assumed prerequisite knowledge and explaining why it matters.
 
 **modules**: One module per cluster, in the order the clusters appear above. For each module:
-- module_id: use the cluster_id exactly as-is.
+- module_id: use sequential identifiers M1, M2, M3, … in the order the clusters appear (independent of cluster_id).
 - title: a learner-facing title (can equal the cluster label or be more descriptive).
 - cluster_id: copy the cluster_id exactly.
 - learning_objectives: 3–5 strings starting with an action verb (e.g., "Explain the role of the B0 field", "Calculate Larmor frequency given field strength"). Each objective maps to items in this cluster.

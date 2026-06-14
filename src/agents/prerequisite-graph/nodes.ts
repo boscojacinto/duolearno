@@ -165,6 +165,10 @@ export async function generateLearningPathNode(state: GraphState): Promise<Parti
     },
   ])) as Phase5Output;
 
+  result.modules = result.modules.map((m: LearningModule, i: number) => ({
+    ...m,
+    module_id: `M${i + 1}`,
+  }));
   result.total_estimated_minutes = result.modules.reduce((s: number, m: LearningModule) => s + m.estimated_minutes, 0);
   console.log(`[duolearno]   Modules: ${result.modules.length}, total: ${result.total_estimated_minutes} min`);
 

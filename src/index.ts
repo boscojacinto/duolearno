@@ -35,7 +35,8 @@ program
   .option("--pretty", "Pretty-print JSON output", false)
   .option("--from <level>", "Override learner starting level (free text)")
   .option("--to <level>", "Override learner target level (free text)")
-  .action(async (options: { pdf: string; output: string; pretty: boolean; from?: string; to?: string }) => {
+  .option("--no-hitl", "Skip the human approval step and write output immediately")
+  .action(async (options: { pdf: string; output: string; pretty: boolean; from?: string; to?: string; hitl: boolean }) => {
     if (!process.env.GEMINI_API_KEY) {
       console.error("Error: GEMINI_API_KEY environment variable is not set.");
       console.error("Copy .env.example to .env and add your key.");
@@ -72,11 +73,15 @@ program
       .flatMap((t) => t.interrupts ?? []);
 
     if (pendingInterrupts.length > 0) {
-      const planSummary = pendingInterrupts[0].value as string;
-      process.stdout.write(planSummary);
-      const answer = await promptUser("  Approve this plan? [y/n]: ");
+      const answer = options.hitl
+        ? await (async () => {
+            const planSummary = pendingInterrupts[0].value as string;
+            process.stdout.write(planSummary);
+            return promptUser("  Approve this plan? [y/n]: ");
+          })()
+        : "yes";
 
-      // Resume the graph with the user's answer
+      // Resume the graph with the user's answer (or auto-approve)
       await drainStream(
         await agent.stream(new LangGraphCommand({ resume: answer }), {
           ...config,
