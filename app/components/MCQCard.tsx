@@ -69,6 +69,11 @@ export default function MCQCard({
   const [hintError, setHintError] = useState<string | null>(null);
   // After a wrong answer the learner must fetch a hint before answering again.
   const [needsHint, setNeedsHint] = useState(false);
+  // Free-form tutoring chat the learner can open after a wrong answer.
+  const [discussion, setDiscussion] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
+  const [discussInput, setDiscussInput] = useState("");
+  const [discussLoading, setDiscussLoading] = useState(false);
+  const [discussError, setDiscussError] = useState<string | null>(null);
   const radioName = useId();
 
   // Tell the page which module is live so previous ones can collapse.
@@ -153,6 +158,40 @@ export default function MCQCard({
       setHintError("Couldn't reach the tutor. Try again.");
     } finally {
       setHintLoading(false);
+    }
+  };
+
+  const sendDiscussion = async () => {
+    const text = discussInput.trim();
+    if (!text || discussLoading) return;
+    const nextMessages = [...discussion, { role: "user" as const, content: text }];
+    setDiscussion(nextMessages);
+    setDiscussInput("");
+    setDiscussLoading(true);
+    setDiscussError(null);
+    try {
+      const res = await fetch("/api/discuss", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId,
+          moduleTitle,
+          question,
+          options,
+          correct_index,
+          messages: nextMessages,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.reply) {
+        setDiscussError(data.error ?? "Couldn't get a reply. Try again.");
+      } else {
+        setDiscussion((prev) => [...prev, { role: "assistant", content: data.reply as string }]);
+      }
+    } catch {
+      setDiscussError("Couldn't reach the tutor. Try again.");
+    } finally {
+      setDiscussLoading(false);
     }
   };
 
@@ -280,6 +319,83 @@ export default function MCQCard({
                 >
                   {hintLoading ? "Thinking…" : hints.length ? "Get another hint" : "💡 Get a hint"}
                 </button>
+
+                {/* Free-form tutoring chat — ask to learn more without ever
+                    getting the answer revealed; the tutor steers back to the question. */}
+                <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px dashed #e2e8f0" }}>
+                  <div style={{ fontSize: 12, color: "#718096", fontWeight: 600, marginBottom: 8 }}>
+                    💬 Stuck? Chat with the tutor about this topic
+                  </div>
+                  {discussion.length > 0 && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 8 }}>
+                      {discussion.map((m, i) => (
+                        <div
+                          key={i}
+                          style={{
+                            alignSelf: m.role === "user" ? "flex-end" : "flex-start",
+                            maxWidth: "85%",
+                            padding: "8px 12px",
+                            borderRadius: 10,
+                            fontSize: 13,
+                            lineHeight: 1.5,
+                            background: m.role === "user" ? "#eef2ff" : "#f7fafc",
+                            border: `1px solid ${m.role === "user" ? "#c7d2fe" : "#e2e8f0"}`,
+                            color: m.role === "user" ? "#3730a3" : "#2d3748",
+                            whiteSpace: "pre-wrap",
+                          }}
+                        >
+                          {m.content}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {discussLoading && (
+                    <div style={{ fontSize: 12, color: "#718096", marginBottom: 8 }}>Tutor is typing…</div>
+                  )}
+                  {discussError && (
+                    <div style={{ fontSize: 12, color: "#e53e3e", marginBottom: 6 }}>{discussError}</div>
+                  )}
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <input
+                      type="text"
+                      value={discussInput}
+                      onChange={(e) => setDiscussInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          void sendDiscussion();
+                        }
+                      }}
+                      placeholder="Ask a question or say what's confusing…"
+                      disabled={discussLoading}
+                      style={{
+                        flex: 1,
+                        padding: "8px 12px",
+                        border: "1px solid #cbd5e0",
+                        borderRadius: 8,
+                        fontSize: 13,
+                        color: "#2d3748",
+                        outline: "none",
+                      }}
+                    />
+                    <button
+                      onClick={() => void sendDiscussion()}
+                      disabled={discussLoading || discussInput.trim() === ""}
+                      style={{
+                        padding: "8px 16px",
+                        background: discussLoading || discussInput.trim() === "" ? "#e2e8f0" : "#4f46e5",
+                        color: discussLoading || discussInput.trim() === "" ? "#a0aec0" : "#fff",
+                        border: "none",
+                        borderRadius: 8,
+                        fontSize: 13,
+                        fontWeight: 600,
+                        cursor: discussLoading || discussInput.trim() === "" ? "default" : "pointer",
+                      }}
+                    >
+                      Send
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
 

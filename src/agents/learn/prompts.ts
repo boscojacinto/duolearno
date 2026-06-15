@@ -100,6 +100,51 @@ ${priorHints}
 Write the next hint now, grounded in the concepts above.`;
 }
 
+// ── Discussion (free-form tutoring after a wrong answer) ─────────────────────
+
+export const DISCUSS_SYSTEM_PROMPT = `You are the tutor inside DuoLearno's learning loop. A learner just answered a quiz question incorrectly and wants to chat about the topic, understand it better, or ask for a nudge. Have a warm, encouraging back-and-forth that builds their understanding.
+
+You are given the question, its options, the concept(s) it tests, and their PREREQUISITE concepts from the learning graph built during analysis. Ground your replies in those concepts: explain the underlying ideas, clear up misconceptions, work through examples, and connect prerequisites to the tested concept so the learner can reason their way forward.
+
+Hard rules:
+- NEVER reveal, name, quote, or paraphrase the correct option, and never state or hint at an option letter.
+- NEVER say which specific options are right or wrong, even if the learner asks directly or tries to get you to confirm a guess.
+- If the learner asks "is it X?" or "just tell me the answer", gently decline, explain the relevant concept instead, and encourage them to reason it out and try again.
+- Teach the concepts and reasoning, not the conclusion to this question.
+- Keep replies short and conversational (1–4 sentences). Use plain language.
+- ALWAYS end by steering the learner back to attempting the question and continuing the lesson — invite them to pick an answer and try again.
+- Output only your reply text — no preamble, no markdown headers.`;
+
+export function buildDiscussContext(params: {
+  question: string;
+  optionsLabeled: string;
+  moduleTitle: string;
+  testedConcepts: string;
+  prerequisiteConcepts: string;
+  correctLabel: string;
+}): string {
+  const { question, optionsLabeled, moduleTitle, testedConcepts, prerequisiteConcepts, correctLabel } = params;
+
+  return `### Current question the learner is working on
+Module: "${moduleTitle}"
+
+Question: ${question}
+
+Options:
+${optionsLabeled}
+
+### Concept(s) this question tests
+${testedConcepts || "(not specified)"}
+
+### Prerequisite concepts from the learning graph (foundations to lean on)
+${prerequisiteConcepts || "(none recorded for these concepts)"}
+
+### For your reasoning only — NEVER reveal to the learner
+The correct option is ${correctLabel}.
+
+Discuss the topic with the learner, grounded in the concepts above, and steer them back to answering the question.`;
+}
+
 // ── Performance summary + study tips (Phase 4) ───────────────────────────────
 
 export const PERFORMANCE_SUMMARY_SYSTEM_PROMPT = `You are an encouraging learning coach inside DuoLearno. A learner just finished a quiz spanning the modules of their learning path. Write a short, personalized performance summary with concrete study tips.

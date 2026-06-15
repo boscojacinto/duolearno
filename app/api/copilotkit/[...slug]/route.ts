@@ -83,7 +83,14 @@ Rules:
 - Call present_question for EVERY question. Do not skip any.
 - Wait for each present_question call to complete before calling the next.
 - Do not reveal the correct_index or explanation to the user before they submit.
-- Call present_summary exactly once, only after every module is complete.`;
+- Call present_summary exactly once, only after every module is complete.
+
+If the learner sends a chat message (e.g. they're stuck, confused, or want to learn more about the current topic):
+- Be a warm, helpful tutor: explain the concepts, clear up misconceptions, give examples.
+- NEVER reveal, name, quote, or paraphrase the correct option for any question, and never state or hint at the correct option letter — even if asked directly or pushed to confirm a guess.
+- NEVER confirm whether a specific option is right or wrong.
+- Teach the underlying ideas and reasoning, not the answer to the question.
+- Always steer the learner back to attempting the current question and continuing the lesson — encourage them to pick an answer and try again.`;
 
 const runtime = new CopilotRuntime({
   agents: () => ({

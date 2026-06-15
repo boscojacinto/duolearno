@@ -35,6 +35,8 @@ import {
   buildMCQPrompt,
   HINT_SYSTEM_PROMPT,
   buildHintPrompt,
+  DISCUSS_SYSTEM_PROMPT,
+  buildDiscussContext,
   PERFORMANCE_SUMMARY_SYSTEM_PROMPT,
   buildPerformanceSummaryPrompt,
 } from "./prompts";
@@ -221,6 +223,62 @@ export async function generateHint(params: {
       correctLabel: LETTERS[correctIndex] ?? "?",
       previousHints,
     }),
+  });
+
+  return text.trim();
+}
+
+// ── Graph-grounded discussion (free-form tutoring after a wrong answer) ───────
+
+export interface DiscussionTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
+/**
+ * Continue a free-form tutoring conversation about a wrongly-answered question.
+ * Grounded in the same prerequisite graph as hints, but multi-turn: the running
+ * chat is passed as `messages`. The tutor explains the topic and answers
+ * questions without ever revealing the correct option, always steering the
+ * learner back to attempting the question.
+ */
+export async function generateDiscussion(params: {
+  question: string;
+  options: string[];
+  correctIndex: number;
+  module: LearningModule | undefined;
+  items: Item[];
+  edges: Edge[];
+  assumedPrerequisites?: AssumedPrerequisite[];
+  messages: DiscussionTurn[];
+}): Promise<string> {
+  const { question, options, correctIndex, module, items, edges, assumedPrerequisites = [], messages } = params;
+
+  const moduleItemIds = new Set(module?.item_ids ?? []);
+  const testedItems = items.filter((it) => moduleItemIds.has(it.id));
+
+  const prereqLines = resolvePrerequisiteConcepts(moduleItemIds, items, edges, assumedPrerequisites).map(
+    (p) => `- ${p.label}${p.assumed ? " (assumed)" : ""}: ${p.description}`
+  );
+
+  const testedConcepts = testedItems.map((it) => `- [${it.type}] ${it.label}: ${it.description}`).join("\n");
+  const optionsLabeled = options.map((o, i) => `${LETTERS[i]}) ${o}`).join("\n");
+
+  // Question/concept context lives in the system prompt; the running chat is
+  // passed as conversation turns so the tutor can hold a coherent thread.
+  const context = buildDiscussContext({
+    question,
+    optionsLabeled,
+    moduleTitle: module?.title ?? "this module",
+    testedConcepts,
+    prerequisiteConcepts: prereqLines.join("\n"),
+    correctLabel: LETTERS[correctIndex] ?? "?",
+  });
+
+  const { text } = await generateText({
+    model: gemini,
+    system: `${DISCUSS_SYSTEM_PROMPT}\n\n${context}`,
+    messages,
   });
 
   return text.trim();
