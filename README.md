@@ -21,7 +21,7 @@ The agent runs in phases:
 ## Stack
 
 - **[Mastra](https://mastra.ai)** (`@mastra/core`) — workflow orchestration (suspend/resume for the approval gate and the quiz loop).
-- **[Vercel AI SDK](https://sdk.vercel.ai)** (`ai`, `@ai-sdk/google`) — structured LLM calls with Zod validation.
+- **AI SDK** (`ai`, `@ai-sdk/google`) — structured LLM calls with Zod validation.
 - **Google Gemini** — the underlying model.
 - **Next.js 14 + [CopilotKit](https://copilotkit.ai) v2** — the web UI and agent runtime.
 - **Redis** — Mastra workflow-run snapshots + short-lived quiz-session memory.

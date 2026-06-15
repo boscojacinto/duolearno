@@ -23,7 +23,7 @@ Requires `.env` with `GEMINI_API_KEY` (see `.env.example`).
 
 ## Architecture
 
-The project uses **Mastra** (`@mastra/core`) for workflow orchestration and the **Vercel AI SDK** (`ai`, `@ai-sdk/google`) for LLM calls with structured output.
+The project uses **Mastra** (`@mastra/core`) for workflow orchestration and the **AI SDK** (`ai`, `@ai-sdk/google`) for LLM calls with structured output.
 
 ### Phase 1 + 2: Analyze Workflow (HITL)
 
@@ -43,7 +43,7 @@ extract-pdf → identify-domain → extract-concepts → build-graph → format-
 | `generate-learning-path` | LLM call — sequenced modules with objectives, time estimates, and milestones (Step 5) |
 | `human-approval` | **HITL** — calls `suspend({ summary })` to pause; CLI prints summary and reads y/n; resumes via `run.resume({ step, resumeData: { answer } })` |
 
-Each LLM call uses `generateObject()` from the Vercel AI SDK with a Zod schema for runtime validation.
+Each LLM call uses `generateObject()` from the AI SDK with a Zod schema for runtime validation.
 
 **Data flow**: Steps use a pass-through accumulated schema pattern — each step's `outputSchema` extends the previous step's `outputSchema` with its new fields. No shared state is needed for the analyze workflow.
 
