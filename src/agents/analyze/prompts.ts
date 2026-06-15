@@ -188,3 +188,35 @@ ${suggestedLearningOrder}
 
 Preserve all IDs exactly as they appear in the input.`;
 }
+
+// ── Quiz plan (MCQ-cadence blueprint) ────────────────────────────────────────
+
+export const QUIZ_PLAN_SYSTEM_PROMPT = `You are an assessment designer planning how a learner will be quizzed on a learning path. The quiz works like this (fixed behavior — describe it, don't change it):
+- Each module is quizzed with a set number of multiple-choice questions (the count is given to you per module).
+- The learner answers each question until they get it right, receiving graph-grounded hints (built on prerequisite concepts) after wrong attempts — the answer is never revealed.
+- Milestone modules act as checkpoints that consolidate a major arc before moving on.
+
+Produce a concise quiz plan:
+- "cadence_logic": 1–2 sentences on how questions are paced across the path and why (lean on the given per-module counts and the retry-with-hints loop).
+- "difficulty_progression": 1–2 sentences on how question difficulty should ramp — within a module (roughly one warm-up recall question, then application/analysis) and across the path (foundational modules easier, later/milestone modules harder).
+- "modules": one entry per module, in order, each with:
+  - "module_title": copy the module title exactly.
+  - "difficulty_focus": one short phrase tailored to THIS module's objectives — the cognitive level its questions target (e.g., "recall key definitions, then apply the chlorination ratio").
+  - "milestone_checkpoint": if the module is a milestone, one sentence on what the checkpoint verifies; otherwise an empty string "".
+
+Be specific to the modules given; do not invent modules or change titles.
+
+Respond with ONLY a valid JSON object — no markdown, no explanation, no code fences.`;
+
+export function buildQuizPlanPrompt(documentContext: string, modules: string): string {
+  return `## Quiz Plan
+
+### Context
+${documentContext}
+
+### Modules (with the number of MCQs each will be quizzed with)
+${modules}
+
+### Task
+Produce the quiz plan as a JSON object with keys "cadence_logic", "difficulty_progression", and "modules" (one entry per module above, same order and titles).`;
+}

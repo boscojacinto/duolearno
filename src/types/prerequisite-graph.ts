@@ -82,6 +82,24 @@ export const LearningPathSchema = z.object({
 
 export const Phase5OutputSchema = LearningPathSchema;
 
+// ── Quiz plan (assessment blueprint shown at approval) ───────────────────────
+// The agent's MCQ-cadence plan: overall logic, difficulty progression, and a
+// per-module breakdown (difficulty focus + milestone checkpoints). Question
+// counts are computed deterministically (mirrors generateMcqs), so the LLM only
+// produces the qualitative strategy.
+export const QuizPlanModuleSchema = z.object({
+  module_title: z.string(),
+  difficulty_focus: z.string(),
+  // What this milestone's questions verify; empty string when not a milestone.
+  milestone_checkpoint: z.string(),
+});
+
+export const QuizPlanSchema = z.object({
+  cadence_logic: z.string(),
+  difficulty_progression: z.string(),
+  modules: z.array(QuizPlanModuleSchema),
+});
+
 // ── Per-phase output schemas ─────────────────────────────────────────────────
 
 export const Phase1OutputSchema = DocumentMetadataSchema;
@@ -123,6 +141,8 @@ export type BoundaryReference = z.infer<typeof BoundaryReferenceSchema>;
 export type Cluster = z.infer<typeof ClusterSchema>;
 export type LearningModule = z.infer<typeof LearningModuleSchema>;
 export type LearningPath = z.infer<typeof LearningPathSchema>;
+export type QuizPlan = z.infer<typeof QuizPlanSchema>;
+export type QuizPlanModule = z.infer<typeof QuizPlanModuleSchema>;
 export type PrerequisiteGraph = z.infer<typeof PrerequisiteGraphSchema>;
 export type Phase1Output = z.infer<typeof Phase1OutputSchema>;
 export type Phase2Output = z.infer<typeof Phase2OutputSchema>;

@@ -16,8 +16,9 @@ import {
   BoundaryReferenceSchema,
   ClusterSchema,
   LearningPathSchema,
+  QuizPlanSchema,
 } from "../../types/prerequisite-graph";
-import type { LearningModule } from "../../types/prerequisite-graph";
+import type { LearningModule, LearningPath, QuizPlan } from "../../types/prerequisite-graph";
 import {
   AGENT_SYSTEM_PROMPT,
   buildPhase1Prompt,
@@ -25,7 +26,14 @@ import {
   buildPhase3Prompt,
   buildPhase4Prompt,
   buildPhase5Prompt,
+  QUIZ_PLAN_SYSTEM_PROMPT,
+  buildQuizPlanPrompt,
 } from "./prompts";
+
+// MCQ count per module, mirroring generateMcqs in the learn phase.
+function mcqCount(objectiveCount: number): number {
+  return Math.max(3, Math.min(objectiveCount + 1, 6));
+}
 
 const googleAI = createGoogleGenerativeAI({ apiKey: process.env.GEMINI_API_KEY! });
 const gemini = googleAI("gemini-3.1-flash-lite");
@@ -64,7 +72,7 @@ const S5 = S4.extend({
   clusters: z.array(ClusterSchema),
 });
 
-export const S6 = S5.extend({ learningPath: LearningPathSchema });
+export const S6 = S5.extend({ learningPath: LearningPathSchema, quizPlan: QuizPlanSchema });
 
 export const AnalyzeOutputSchema = z.object({
   approvalStatus: z.enum(["approved", "rejected"]),
@@ -256,7 +264,31 @@ export const generateLearningPathStep = createStep({
     );
     console.log(`[duolearno]   Modules: ${modules.length}, total: ${total_estimated_minutes} min`);
 
-    return { ...inputData, learningPath: { ...object, modules, total_estimated_minutes } };
+    // Quiz plan: the agent's MCQ-cadence blueprint (logic, difficulty, milestone
+    // checkpoints), grounded in the computed per-module question counts.
+    console.log("[duolearno]   Planning quiz cadence...");
+    const moduleBrief = modules.map((m: LearningModule) => ({
+      module_title: m.title,
+      question_count: mcqCount(m.learning_objectives.length),
+      learning_objectives: m.learning_objectives,
+      is_milestone: m.is_milestone,
+      milestone_description: m.milestone_description,
+    }));
+    const { object: quizPlan } = await generateObject({
+      model: gemini,
+      schema: QuizPlanSchema,
+      system: QUIZ_PLAN_SYSTEM_PROMPT,
+      prompt: buildQuizPlanPrompt(
+        `${inputData.documentMetadata.domain} › ${inputData.documentMetadata.sub_domain} (${inputData.documentMetadata.proficiency_band})`,
+        JSON.stringify(moduleBrief, null, 2)
+      ),
+    });
+
+    return {
+      ...inputData,
+      learningPath: { ...object, modules, total_estimated_minutes },
+      quizPlan,
+    };
   },
 });
 
@@ -305,6 +337,41 @@ function formatPlanSummary(data: {
   return lines.join("\n");
 }
 
+function formatQuizPlan(quizPlan: QuizPlan, learningPath: LearningPath): string {
+  const hr = "─".repeat(56);
+  const byTitle = new Map(quizPlan.modules.map((m) => [m.module_title, m] as const));
+  const totalQuestions = learningPath.modules.reduce(
+    (s, m) => s + mcqCount(m.learning_objectives.length),
+    0
+  );
+
+  const lines: string[] = [
+    hr,
+    "  QUIZ PLAN — MCQ CADENCE",
+    hr,
+    "",
+    `  Total      : ~${totalQuestions} questions across ${learningPath.modules.length} module${learningPath.modules.length !== 1 ? "s" : ""} (answer-until-correct, with hints)`,
+    `  Logic      : ${quizPlan.cadence_logic}`,
+    `  Difficulty : ${quizPlan.difficulty_progression}`,
+    "",
+    "  PER MODULE:",
+  ];
+
+  for (const mod of learningPath.modules) {
+    const plan = byTitle.get(mod.title);
+    const count = mcqCount(mod.learning_objectives.length);
+    const milestone = mod.is_milestone ? " ✦ milestone" : "";
+    lines.push(`    ${mod.module_id}. ${mod.title} — ${count} questions${milestone}`);
+    if (plan?.difficulty_focus) lines.push(`       ↳ ${plan.difficulty_focus}`);
+    if (mod.is_milestone && plan?.milestone_checkpoint) {
+      lines.push(`       ✦ Checkpoint: ${plan.milestone_checkpoint}`);
+    }
+  }
+
+  lines.push("", hr, "");
+  return lines.join("\n");
+}
+
 export const humanApprovalStep = createStep({
   id: "human-approval",
   inputSchema: S6,
@@ -315,12 +382,13 @@ export const humanApprovalStep = createStep({
     const { answer } = resumeData ?? {};
 
     if (!answer) {
-      const summary = formatPlanSummary({
+      const planSummary = formatPlanSummary({
         documentMetadata: inputData.documentMetadata,
         learningPath: inputData.learningPath,
         prerequisitesAssumed: inputData.prerequisitesAssumed,
       });
-      return suspend({ summary });
+      const quizPlan = formatQuizPlan(inputData.quizPlan, inputData.learningPath);
+      return suspend({ summary: `${planSummary}\n${quizPlan}` });
     }
 
     const normalized = answer.trim().toLowerCase();

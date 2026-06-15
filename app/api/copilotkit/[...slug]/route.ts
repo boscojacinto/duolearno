@@ -92,7 +92,10 @@ const runtime = new CopilotRuntime({
       apiKey: process.env.GEMINI_API_KEY,
       prompt: QUIZ_SYSTEM_PROMPT,
       tools: [generateMcqsTool, presentSummaryTool],
-      maxSteps: 50,
+      // A full quiz is one step per question + per generate_mcqs + the final
+      // present_summary; large graphs (8 modules ≈ 57 steps) blow past 50 and
+      // truncate before the summary, so keep generous headroom.
+      maxSteps: 200,
     }),
   }),
 });

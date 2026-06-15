@@ -13,9 +13,28 @@ import MCQCard from "./components/MCQCard";
 import ApprovalCard from "./components/ApprovalCard";
 import QuizPrepCard from "./components/QuizPrepCard";
 import PerformanceSummaryCard from "./components/PerformanceSummaryCard";
+import ModuleDivider from "./components/ModuleDivider";
+import AnalyzeProgress from "./components/AnalyzeProgress";
 import type { PerformanceSummary } from "@/src/types/learning-loop";
 
 type AppState = "upload" | "analyzing" | "approving" | "quiz";
+
+// Estimate quiz length from the modules. Question count per module mirrors
+// generateMcqs: max(3, min(objectives + 1, 6)). Answering an MCQ is quick
+// (~30s), unlike the learning path's `total_estimated_minutes`, which is the
+// time to *study* the material — far too long for a quiz.
+const SECONDS_PER_QUESTION = 30;
+function estimateQuiz(modules: { learning_objectives: string[] }[]): {
+  questions: number;
+  minutes: number;
+} {
+  const questions = modules.reduce(
+    (sum, m) => sum + Math.max(3, Math.min((m.learning_objectives?.length ?? 0) + 1, 6)),
+    0
+  );
+  const minutes = Math.max(1, Math.round((questions * SECONDS_PER_QUESTION) / 60));
+  return { questions, minutes };
+}
 
 interface QuizData {
   sessionId: string;
@@ -46,6 +65,7 @@ export default function Page() {
   const [currentModule, setCurrentModule] = useState<string | null>(null);
   const [approvalLoading, setApprovalLoading] = useState(false);
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
+  const [analyzeStepId, setAnalyzeStepId] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -59,6 +79,10 @@ export default function Page() {
   // the result endpoint can mark the session complete.
   const learningPathRef = useRef<QuizData["learningPath"] | null>(null);
   learningPathRef.current = quizData?.learningPath ?? null;
+  // Real per-module question count, captured from each generate_mcqs result. The
+  // agent's own `total` arg is unreliable (it produced "Question 5 / 4"), so the
+  // number of questions the tool actually returned is the source of truth.
+  const questionTotalsRef = useRef<Map<string, number>>(new Map());
 
   // Share quiz data with the CopilotKit agent
   useAgentContext({
@@ -85,24 +109,35 @@ export default function Page() {
       const lp = learningPathRef.current;
       const moduleIdx = lp ? lp.modules.findIndex((m) => m.title === args.moduleTitle) : -1;
       const isLastModule = moduleIdx >= 0 && moduleIdx === lp!.modules.length - 1;
+      // Prefer the real generated count over the agent's unreliable `total`.
+      const total = questionTotalsRef.current.get(args.moduleTitle) ?? args.total;
       // Render both the live question (executing) and the answered one
       // (complete) so the correct answer stays visible for every question.
       return (
-        <MCQCard
-          question={args.question}
-          options={args.options}
-          moduleTitle={args.moduleTitle}
-          questionIndex={args.questionIndex}
-          total={args.total}
-          correct_index={args.correct_index}
-          explanation={args.explanation}
-          active={status === "executing"}
-          currentModule={currentModuleRef.current}
-          onActivate={setCurrentModule}
-          sessionId={sessionIdRef.current}
-          isLastModule={isLastModule}
-          respond={respond}
-        />
+        <>
+          {args.questionIndex === 0 && (
+            <ModuleDivider
+              title={args.moduleTitle}
+              index={moduleIdx}
+              totalModules={lp?.modules.length}
+            />
+          )}
+          <MCQCard
+            question={args.question}
+            options={args.options}
+            moduleTitle={args.moduleTitle}
+            questionIndex={args.questionIndex}
+            total={total}
+            correct_index={args.correct_index}
+            explanation={args.explanation}
+            active={status === "executing"}
+            currentModule={currentModuleRef.current}
+            onActivate={setCurrentModule}
+            sessionId={sessionIdRef.current}
+            isLastModule={isLastModule}
+            respond={respond}
+          />
+        </>
       );
     },
   });
@@ -114,8 +149,22 @@ export default function Page() {
     parameters: z.object({
       module: z.object({ title: z.string() }).partial().passthrough().optional(),
     }),
-    render: ({ status, parameters }) => {
-      if (status === "complete") return <></>;
+    render: ({ status, parameters, result }) => {
+      if (status === "complete") {
+        // Record how many questions were actually generated for this module so
+        // present_question can show a correct "N / total".
+        const title = parameters?.module?.title;
+        if (title) {
+          try {
+            const parsed = typeof result === "string" ? JSON.parse(result) : result;
+            const n = (parsed as { questions?: unknown[] } | undefined)?.questions?.length;
+            if (typeof n === "number" && n > 0) questionTotalsRef.current.set(title, n);
+          } catch {
+            /* leave total to the agent-provided fallback */
+          }
+        }
+        return <></>;
+      }
       // Only switch the active module once args are fully assembled (executing),
       // so a partially-streamed title doesn't flicker into the header.
       return (
@@ -157,9 +206,33 @@ export default function Page() {
           </div>
         );
       }
-      const summary = (result as { summary?: PerformanceSummary } | undefined)?.summary;
-      if (!summary) return <></>;
-      return <PerformanceSummaryCard summary={summary} />;
+      // Server-tool results arrive as the tool message content — a JSON string,
+      // not a parsed object — so decode it before reading the summary.
+      let payload: { summary?: PerformanceSummary; error?: string; headline?: string } | undefined;
+      try {
+        payload = typeof result === "string" ? JSON.parse(result) : (result as typeof payload);
+      } catch {
+        payload = undefined;
+      }
+      // Tolerate either a { summary } wrapper or a bare summary object.
+      const summary = payload?.summary ?? (payload?.headline ? (payload as PerformanceSummary) : undefined);
+      if (summary) return <PerformanceSummaryCard summary={summary} />;
+      return (
+        <div
+          style={{
+            border: "1px solid #fed7d7",
+            background: "#fff5f5",
+            color: "#9b2c2c",
+            borderRadius: 12,
+            padding: "14px 18px",
+            margin: "8px 0",
+            maxWidth: 640,
+            fontSize: 14,
+          }}
+        >
+          Couldn’t generate your performance summary{payload?.error ? `: ${payload.error}` : "."}
+        </div>
+      );
     },
   });
 
@@ -182,23 +255,64 @@ export default function Page() {
       return;
     }
     setAnalyzeError(null);
+    setAnalyzeStepId(null);
     setAppState("analyzing");
 
     try {
       const formData = new FormData();
       formData.append("pdf", file);
       const res = await fetch("/api/analyze", { method: "POST", body: formData });
-      const data = await res.json();
 
-      if (!res.ok || data.error) {
+      // A non-OK response is plain JSON (e.g. validation error), not a stream.
+      if (!res.ok || !res.body) {
+        const data = await res.json().catch(() => ({}));
         setAnalyzeError(data.error ?? "Analysis failed");
         setAppState("upload");
         return;
       }
 
-      setRunId(data.runId);
-      setSummary(data.summary);
-      setAppState("approving");
+      // Consume the SSE stream of workflow step events, advancing the stepper
+      // until the workflow suspends at the human-approval gate.
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let finished = false;
+
+      while (!finished) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        // SSE messages are separated by a blank line.
+        const messages = buffer.split("\n\n");
+        buffer = messages.pop() ?? "";
+
+        for (const message of messages) {
+          let event = "message";
+          let dataStr = "";
+          for (const line of message.split("\n")) {
+            if (line.startsWith("event:")) event = line.slice(6).trim();
+            else if (line.startsWith("data:")) dataStr += line.slice(5).trim();
+          }
+          if (!dataStr) continue;
+          const data = JSON.parse(dataStr);
+
+          if (event === "step" && data.status === "start") {
+            setAnalyzeStepId(data.id as string);
+          } else if (event === "suspended") {
+            setRunId(data.runId);
+            setSummary(data.summary);
+            setAppState("approving");
+            finished = true;
+            break;
+          } else if (event === "error") {
+            setAnalyzeError(data.message ?? "Analysis failed");
+            setAppState("upload");
+            finished = true;
+            break;
+          }
+        }
+      }
     } catch (err) {
       setAnalyzeError(err instanceof Error ? err.message : "Network error");
       setAppState("upload");
@@ -307,13 +421,7 @@ export default function Page() {
       )}
 
       {/* Analyzing state */}
-      {appState === "analyzing" && (
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", gap: 16 }}>
-          <div style={{ fontSize: 40 }}>⏳</div>
-          <p style={{ fontSize: 18, color: "#4a5568", fontWeight: 500 }}>Analyzing your PDF…</p>
-          <p style={{ fontSize: 14, color: "#a0aec0" }}>This takes 10–30 seconds. Please wait.</p>
-        </div>
-      )}
+      {appState === "analyzing" && <AnalyzeProgress currentStepId={analyzeStepId} />}
 
       {/* Approval state */}
       {appState === "approving" && (
@@ -340,9 +448,14 @@ export default function Page() {
           }}>
             <span style={{ fontSize: 20 }}>🎓</span>
             <span style={{ fontWeight: 600, color: "#1a202c" }}>{quizData.learningPath.title}</span>
-            <span style={{ fontSize: 13, color: "#718096" }}>
-              {quizData.learningPath.modules.length} modules · ~{quizData.learningPath.total_estimated_minutes} min
-            </span>
+            {(() => {
+              const { questions, minutes } = estimateQuiz(quizData.learningPath.modules);
+              return (
+                <span style={{ fontSize: 13, color: "#718096" }}>
+                  {quizData.learningPath.modules.length} modules · ~{questions} questions · ~{minutes} min
+                </span>
+              );
+            })()}
             {currentModule && (() => {
               const idx = quizData.learningPath.modules.findIndex((m) => m.title === currentModule);
               return (
