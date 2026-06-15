@@ -1,20 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
-import { analyzeRuns, quizSessions } from "@/src/store/server-store";
+import { mastra } from "@/src/mastra";
+import { quizSessions } from "@/src/store/server-store";
 import type { AnalyzeOutputSchema } from "@/src/agents/analyze/steps";
 import type { z } from "zod";
 
 export async function POST(request: NextRequest) {
   const { runId, approved } = (await request.json()) as { runId: string; approved: boolean };
 
-  const entry = analyzeRuns.get(runId);
-  if (!entry) {
-    return NextResponse.json({ error: "Run not found or already resumed" }, { status: 404 });
+  if (!runId) {
+    return NextResponse.json({ error: "Missing runId" }, { status: 400 });
   }
-  analyzeRuns.delete(runId);
 
   try {
-    const result = await entry.run.resume({
+    // Rehydrate the suspended run from Redis (Mastra storage) and resume it —
+    // works across restarts / instances, no in-memory handle required.
+    const run = await mastra.getWorkflow("analyzeWorkflow").createRun({ runId });
+    const result = await run.resume({
       step: "human-approval",
       resumeData: { answer: approved ? "y" : "n" },
     });
@@ -36,7 +38,7 @@ export async function POST(request: NextRequest) {
     }
 
     const sessionId = randomUUID();
-    quizSessions.set(sessionId, {
+    await quizSessions.set(sessionId, {
       items: output.finalOutput.items,
       documentMetadata: output.finalOutput.document_metadata,
       edges: output.finalOutput.edges,

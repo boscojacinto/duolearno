@@ -18,7 +18,7 @@ const generateMcqsTool = defineTool({
     module: LearningModuleSchema,
   }),
   execute: async ({ sessionId, module }) => {
-    const session = quizSessions.get(sessionId);
+    const session = await quizSessions.get(sessionId);
     if (!session) {
       return { error: "Session not found. The quiz data may have expired." };
     }

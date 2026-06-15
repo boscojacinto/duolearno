@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid request" }, { status: 400 });
   }
 
-  const session = quizSessions.get(sessionId);
+  const session = await quizSessions.get(sessionId);
   if (!session) {
     return NextResponse.json({ error: "Session not found. The quiz data may have expired." }, { status: 404 });
   }
