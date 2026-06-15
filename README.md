@@ -96,6 +96,16 @@ npm run dev -- learn --input out.json
 | `--to <level>` | — | Override the learner's target level (free text) |
 | `--no-hitl` | — | Skip the human-approval step |
 
+## Known issues & limitations
+
+- **Best on small PDFs / focused topics (~10–15 pages).** The whole document is fed through a chain of sequential Gemini calls, so larger inputs make analysis slow (and can hit context limits). Scaling to bigger documents would likely need a RAG design (chunk + retrieve) and a persistent knowledge graph, rather than passing the full text through each step.
+- **Text-based PDFs only.** Extraction uses `pdf-parse`, which reads embedded text. Scanned or image-only PDFs (no OCR) won't work, and heavy layouts, equations, tables, or figures may extract poorly and degrade the resulting graph.
+- **LLM-generated content varies.** The prerequisite graph, learning path, MCQs, hints, tutor replies, and performance summary are all model-generated. Quality differs across documents and runs, and output can contain inaccuracies — the HITL approval gate is the only human checkpoint.
+- **Quiz context expires after 24h.** The Redis-backed quiz session (the analyze-phase graph used for hints, the tutor chat, and MCQ generation) has a 24-hour TTL. A web quiz left idle longer than that loses its hint/tutor grounding.
+- **Persistence is best-effort.** A Postgres outage is logged but never interrupts a quiz, so durable records (analyses, results, summaries) can be silently incomplete after a DB hiccup.
+- **Single model provider.** Only Google Gemini is wired in — there is no provider fallback or configurable model selection.
+- **CLI approval is interactive.** `analyze` suspends for a `y/n` prompt; in non-interactive environments pass `--no-hitl` to skip the gate.
+
 ## Development
 
 ```bash
