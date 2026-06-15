@@ -99,3 +99,76 @@ ${priorHints}
 
 Write the next hint now, grounded in the concepts above.`;
 }
+
+// ── Performance summary + study tips (Phase 4) ───────────────────────────────
+
+export const PERFORMANCE_SUMMARY_SYSTEM_PROMPT = `You are an encouraging learning coach inside DuoLearno. A learner just finished a quiz spanning the modules of their learning path. Write a short, personalized performance summary with concrete study tips.
+
+You are given their overall accuracy, per-module scores, and — for the modules they struggled with — the PREREQUISITE concepts from the learning graph that those modules build on. Ground your advice in that graph: when a module was weak, point the learner at the specific prerequisite concept(s) to revisit and explain the link.
+
+Rules:
+- Be specific and actionable — never generic like "study more".
+- Be warm and motivating; never condescending or shaming, even for low scores.
+- For each weak module provided, write ONE focused tip (1–2 sentences) that leans on its prerequisite concepts.
+- "strengths": 1–3 genuine positives (modules done well, or effort).
+- "study_tips": 3–5 short, actionable tips tailored to these results.
+- "next_steps": one or two sentences on what to do next.
+- If the learner did well across the board, celebrate it and suggest how to deepen or extend their mastery.
+
+${JSON_INSTRUCTION}`;
+
+export function buildPerformanceSummaryPrompt(params: {
+  pathTitle: string;
+  fromLevel: string;
+  toLevel: string;
+  accuracyPct: number;
+  totalQuestions: number;
+  correctAnswers: number;
+  moduleScores: { title: string; scorePct: number; correct: number; total: number }[];
+  focusAreas: {
+    title: string;
+    scorePct: number;
+    prerequisites: { label: string; description: string; assumed: boolean }[];
+  }[];
+}): string {
+  const moduleLines = params.moduleScores
+    .map((m) => `- ${m.title}: ${m.correct}/${m.total} (${m.scorePct}%)`)
+    .join("\n");
+
+  const focusBlock =
+    params.focusAreas.length > 0
+      ? params.focusAreas
+          .map((f) => {
+            const prereqs =
+              f.prerequisites.length > 0
+                ? f.prerequisites
+                    .map((p) => `    • ${p.label}${p.assumed ? " (assumed)" : ""}: ${p.description}`)
+                    .join("\n")
+                : "    • (no prerequisites recorded — lean on the module's own concepts)";
+            return `- Module "${f.title}" (${f.scorePct}%) — prerequisite concepts to revisit:\n${prereqs}`;
+          })
+          .join("\n")
+      : "(none — the learner scored well on every module)";
+
+  return `## Learner Performance
+
+### Learning path: "${params.pathTitle}"
+Journey: ${params.fromLevel || "(unspecified)"} → ${params.toLevel || "(unspecified)"}
+
+### Overall
+Score: ${params.correctAnswers}/${params.totalQuestions} (${params.accuracyPct}% first-attempt accuracy)
+
+### Per-module scores
+${moduleLines}
+
+### Modules to focus on (with graph prerequisites)
+${focusBlock}
+
+### Task
+Return a JSON object with keys:
+- "headline": one encouraging sentence summarizing how they did
+- "strengths": array of 1–3 strings
+- "focus_area_tips": array of { "module_title", "tip" } — ONE per focus module above, each leaning on that module's prerequisite concepts
+- "study_tips": array of 3–5 actionable strings
+- "next_steps": one or two sentences`;
+}

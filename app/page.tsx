@@ -12,6 +12,8 @@ import { z } from "zod";
 import MCQCard from "./components/MCQCard";
 import ApprovalCard from "./components/ApprovalCard";
 import QuizPrepCard from "./components/QuizPrepCard";
+import PerformanceSummaryCard from "./components/PerformanceSummaryCard";
+import type { PerformanceSummary } from "@/src/types/learning-loop";
 
 type AppState = "upload" | "analyzing" | "approving" | "quiz";
 
@@ -122,6 +124,42 @@ export default function Page() {
           onShow={status === "executing" ? setCurrentModule : undefined}
         />
       );
+    },
+  });
+
+  // Render the end-of-quiz performance summary + study tips. The agent calls the
+  // server-side present_summary tool once all modules are done; its result is the
+  // generated PerformanceSummary.
+  useRenderTool({
+    name: "present_summary",
+    parameters: z.object({ sessionId: z.string() }),
+    render: ({ status, result }) => {
+      if (status !== "complete") {
+        return (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              border: "1px solid #e2e8f0",
+              borderRadius: 12,
+              padding: "14px 18px",
+              margin: "8px 0",
+              background: "#fff",
+              boxShadow: "0 1px 4px rgba(0,0,0,0.06)",
+              maxWidth: 640,
+              fontSize: 14,
+              color: "#4a5568",
+              fontWeight: 500,
+            }}
+          >
+            <span aria-hidden>📊</span> Preparing your performance summary…
+          </div>
+        );
+      }
+      const summary = (result as { summary?: PerformanceSummary } | undefined)?.summary;
+      if (!summary) return <></>;
+      return <PerformanceSummaryCard summary={summary} />;
     },
   });
 

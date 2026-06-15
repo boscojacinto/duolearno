@@ -8,14 +8,15 @@ import { mastra } from "./mastra";
 import type { z } from "zod";
 import type { AnalyzeOutputSchema } from "./agents/analyze/steps";
 import type { LearnOutputSchema } from "./agents/learn/steps";
-import { EMPTY_QUIZ_STATE } from "./agents/learn/steps";
+import { EMPTY_QUIZ_STATE, generatePerformanceSummary } from "./agents/learn/steps";
 import {
   saveAnalysis,
   createQuizSession,
   saveModuleResults,
+  saveSessionSummary,
   analysisExists,
 } from "./store/records-store";
-import type { ModuleResult } from "./types/learning-loop";
+import type { ModuleResult, PerformanceSummary } from "./types/learning-loop";
 import type {
   LearningPath,
   DocumentMetadata,
@@ -60,6 +61,39 @@ function printFinalSummary(moduleResults: ModuleResult[], learningPath: Learning
   } else {
     console.log("\n  Keep at it. Re-read the source material and try again.");
   }
+  console.log(`\n${hr}\n`);
+}
+
+function printPerformanceSummary(summary: PerformanceSummary): void {
+  const hr = "═".repeat(58);
+  console.log(`${hr}`);
+  console.log(`  PERFORMANCE SUMMARY & STUDY TIPS`);
+  console.log(hr);
+  console.log(`\n  ${summary.headline}`);
+  console.log(`  Accuracy: ${summary.correct_answers}/${summary.total_questions} (${summary.accuracy_pct}%)`);
+
+  if (summary.strengths.length > 0) {
+    console.log(`\n  Strengths:`);
+    for (const s of summary.strengths) console.log(`    • ${s}`);
+  }
+
+  if (summary.focus_areas.length > 0) {
+    console.log(`\n  Focus areas:`);
+    for (const f of summary.focus_areas) {
+      console.log(`    ▸ ${f.module_title} (${f.score_pct}%)`);
+      console.log(`      ${f.tip}`);
+      if (f.prerequisite_concepts.length > 0) {
+        console.log(`      Revisit: ${f.prerequisite_concepts.join(", ")}`);
+      }
+    }
+  }
+
+  if (summary.study_tips.length > 0) {
+    console.log(`\n  Study tips:`);
+    for (const t of summary.study_tips) console.log(`    • ${t}`);
+  }
+
+  console.log(`\n  Next steps: ${summary.next_steps}`);
   console.log(`\n${hr}\n`);
 }
 
@@ -285,9 +319,14 @@ program
     const learnResult = result.result as z.infer<typeof LearnOutputSchema>;
     printFinalSummary(learnResult.moduleResults, learnResult.learningPath);
 
+    const edges = (rawJson.edges as Edge[] | undefined) ?? [];
+    const assumedPrerequisites =
+      (rawJson.prerequisites_assumed as AssumedPrerequisite[] | undefined) ?? [];
+
     // Persist the run to Postgres: reuse the analysis row if the input JSON
     // carries an analysis_id from `analyze`, otherwise create one from the
     // input. Best-effort — never fail the session over a DB error.
+    let sessionId: string | undefined;
     try {
       let analysisId =
         typeof rawJson.analysis_id === "string" ? (rawJson.analysis_id as string) : undefined;
@@ -295,14 +334,14 @@ program
         analysisId = await saveAnalysis({
           documentMetadata,
           items,
-          edges: (rawJson.edges as Edge[] | undefined) ?? [],
-          assumedPrerequisites: (rawJson.prerequisites_assumed as AssumedPrerequisite[] | undefined) ?? [],
+          edges,
+          assumedPrerequisites,
           clusters: (rawJson.clusters as unknown[] | undefined) ?? [],
           learningPath,
           sourceFilename: path.basename(inputPath),
         });
       }
-      const sessionId = await createQuizSession({
+      sessionId = await createQuizSession({
         analysisId,
         title: learningPath.title,
         source: "cli",
@@ -312,6 +351,26 @@ program
     } catch (e) {
       console.warn(
         "[duolearno] Could not persist quiz results:",
+        e instanceof Error ? e.message : e
+      );
+    }
+
+    // Generate the graph-grounded performance summary + study tips, print it,
+    // and persist it (if we have a session). Best-effort — never fail the run.
+    try {
+      console.log("[duolearno] Generating your performance summary...\n");
+      const summary = await generatePerformanceSummary({
+        moduleResults: learnResult.moduleResults,
+        learningPath,
+        items,
+        edges,
+        assumedPrerequisites,
+      });
+      printPerformanceSummary(summary);
+      if (sessionId) await saveSessionSummary(sessionId, summary);
+    } catch (e) {
+      console.warn(
+        "[duolearno] Could not generate performance summary:",
         e instanceof Error ? e.message : e
       );
     }
