@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useId } from "react";
 
 const LABELS = ["A", "B", "C", "D"] as const;
 
@@ -67,6 +67,9 @@ export default function MCQCard({
   const [hints, setHints] = useState<string[]>([]);
   const [hintLoading, setHintLoading] = useState(false);
   const [hintError, setHintError] = useState<string | null>(null);
+  // After a wrong answer the learner must fetch a hint before answering again.
+  const [needsHint, setNeedsHint] = useState(false);
+  const radioName = useId();
 
   // Tell the page which module is live so previous ones can collapse.
   useEffect(() => {
@@ -116,9 +119,11 @@ export default function MCQCard({
       }
       return;
     }
-    // Wrong: lock that option, clear the pick, offer a hint + retry. Never reveal.
+    // Wrong: lock that option, clear the pick, and require a hint before the
+    // next attempt. Never reveal the answer.
     setTriedWrong((prev) => (prev.includes(selected) ? prev : [...prev, selected]));
     setSelected(null);
+    setNeedsHint(true);
   };
 
   const getHint = async () => {
@@ -142,6 +147,7 @@ export default function MCQCard({
         setHintError(data.error ?? "Couldn't fetch a hint. Try again.");
       } else {
         setHints((prev) => [...prev, data.hint as string]);
+        setNeedsHint(false); // hint received — answering is unlocked again
       }
     } catch {
       setHintError("Couldn't reach the tutor. Try again.");
@@ -168,7 +174,9 @@ export default function MCQCard({
           {options.map((opt, i) => {
             const isTriedWrong = triedWrong.includes(i);
             const isCorrectDone = concluded && i === correct_index;
-            const locked = concluded || isTriedWrong;
+            // Answered/wrong options stay locked; everything locks while a hint
+            // is required after a wrong attempt.
+            const locked = concluded || isTriedWrong || needsHint;
 
             let bg = "#f7fafc";
             let borderColor = "#e2e8f0";
@@ -178,10 +186,8 @@ export default function MCQCard({
             else if (i === selected) { bg = "#ebf4ff"; borderColor = "#4299e1"; color = "#2b6cb0"; }
 
             return (
-              <button
+              <label
                 key={i}
-                disabled={locked}
-                onClick={() => !locked && setSelected(i)}
                 style={{
                   display: "flex",
                   alignItems: "flex-start",
@@ -194,14 +200,22 @@ export default function MCQCard({
                   color,
                   cursor: locked ? "default" : "pointer",
                   opacity: isTriedWrong && !concluded ? 0.6 : 1,
-                  textAlign: "left",
                   transition: "all 0.15s",
                 }}
               >
+                <input
+                  type="radio"
+                  name={radioName}
+                  value={i}
+                  checked={selected === i}
+                  disabled={locked}
+                  onChange={() => !locked && setSelected(i)}
+                  style={{ marginTop: 2, accentColor: "#4f46e5", cursor: locked ? "default" : "pointer" }}
+                />
                 <span style={{ fontWeight: 700, minWidth: 20 }}>{LABELS[i]})</span>
                 <span>{opt}</span>
                 {isTriedWrong && <span style={{ marginLeft: "auto", fontWeight: 600 }}>✗</span>}
-              </button>
+              </label>
             );
           })}
         </div>
@@ -223,8 +237,10 @@ export default function MCQCard({
           <>
             {wrongAttempted && (
               <div style={{ marginTop: 14 }}>
-                <div style={{ fontSize: 13, color: "#9b2c2c", fontWeight: 500, marginBottom: hints.length ? 8 : 0 }}>
-                  Not quite — pick another option, or ask for a hint.
+                <div style={{ fontSize: 13, color: "#9b2c2c", fontWeight: 500, marginBottom: 8 }}>
+                  {needsHint
+                    ? "Not quite — get a hint to unlock your next try."
+                    : "Pick another option and try again."}
                 </div>
                 {hints.map((h, i) => (
                   <div
@@ -253,9 +269,9 @@ export default function MCQCard({
                   disabled={hintLoading}
                   style={{
                     padding: "6px 14px",
-                    background: "#fff",
+                    background: needsHint ? "#fffbeb" : "#fff",
                     color: "#b45309",
-                    border: "1px solid #fcd34d",
+                    border: `1px solid ${needsHint ? "#f59e0b" : "#fcd34d"}`,
                     borderRadius: 8,
                     fontSize: 13,
                     fontWeight: 600,
@@ -270,17 +286,18 @@ export default function MCQCard({
             <div>
               <button
                 onClick={handleSubmit}
-                disabled={selected === null}
+                disabled={selected === null || needsHint}
+                title={needsHint ? "Get a hint before trying again" : undefined}
                 style={{
                   marginTop: 16,
                   padding: "10px 28px",
-                  background: selected === null ? "#e2e8f0" : "#4f46e5",
-                  color: selected === null ? "#a0aec0" : "#fff",
+                  background: selected === null || needsHint ? "#e2e8f0" : "#4f46e5",
+                  color: selected === null || needsHint ? "#a0aec0" : "#fff",
                   border: "none",
                   borderRadius: 8,
                   fontSize: 14,
                   fontWeight: 600,
-                  cursor: selected === null ? "not-allowed" : "pointer",
+                  cursor: selected === null || needsHint ? "not-allowed" : "pointer",
                   transition: "all 0.15s",
                 }}
               >
