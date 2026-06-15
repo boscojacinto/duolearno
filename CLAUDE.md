@@ -79,7 +79,10 @@ init-quiz → [dountil: quiz (suspend per question)] → summary
 - `src/agents/learn/prompts.ts` — MCQ generation prompt builder.
 - `src/agents/learn/steps.ts` — `initQuizStep`, `quizStep` (suspend/resume + evaluation), `summaryStep`; `QuizStateSchema` shared state.
 - `src/agents/learn/workflow.ts` — Wires learn steps: `.then(init).dountil(quiz, condition).then(summary).commit()`.
-- `src/mastra.ts` — `Mastra` instance registering both workflows.
+- `src/mastra.ts` — `Mastra` instance registering both workflows; Redis-backed workflow-run storage.
+- `src/store/server-store.ts` — Redis-backed short-lived quiz-session memory (graph for hints/MCQs, 24h TTL).
+- `src/store/records-store.ts` — PostgreSQL (`pg`) durable application records: analyses, quiz sessions, per-module and per-question results. Lazily creates its schema on first connect.
+- `db/schema.sql` — Canonical reference DDL for the Postgres tables (the app auto-creates them too).
 - `src/tools/pdf-extractor.ts` — Thin wrapper around `pdf-parse`; returns text, page count, and PDF metadata.
 - `src/index.ts` — `commander` CLI entry point (`analyze` and `learn` commands).
 
@@ -96,6 +99,11 @@ const gemini = googleAI('gemini-2.5-flash')
 const { object } = await generateObject({ model: gemini, schema: ZodSchema, system, prompt })
 ```
 
-### Planned additions
+### Storage
 
-PostgreSQL (Mastra persistent storage) will replace the default in-memory state in later phases, enabling persistent run history and resumable sessions across process restarts.
+Two stores back the app (both required via env):
+
+- **Redis** (`REDIS_URL`) — Mastra workflow-run snapshots (`src/mastra.ts`, so suspended HITL runs resume by `runId` across restarts/instances) and short-lived quiz-session memory (`src/store/server-store.ts`, 24h TTL, carries the analyze-phase graph for hints/MCQs).
+- **PostgreSQL** (`DATABASE_URL`) — durable system of record (`src/store/records-store.ts`): `analyses` (graph + learning path per PDF), `quiz_sessions`, `module_results`, `question_results`. Tables are created automatically on first connection; `db/schema.sql` is the canonical reference DDL.
+
+Result recording is best-effort everywhere — a Postgres failure logs an error but never breaks a quiz or loses the CLI's JSON output. The web quiz records each concluded question via `POST /api/quiz/result` (resolving `module_id` from the Redis session, rolling totals into `module_results`/`quiz_sessions`, marking the session complete on the last module's last question). The `analyze` CLI persists the analysis and embeds its `analysis_id` in the output JSON; the `learn` CLI reuses that id (or recreates the analysis) and writes the full run via `saveModuleResults`.

@@ -19,6 +19,8 @@ interface MCQCardProps {
   onActivate: (moduleTitle: string) => void;
   /** Quiz session id — lets the hint endpoint load the prerequisite graph. */
   sessionId: string;
+  /** True when this question's module is the last in the learning path. */
+  isLastModule?: boolean;
   /** Defined only while active; resolves the human-in-the-loop call. */
   respond?: (result: { answer: string }) => void;
 }
@@ -56,6 +58,7 @@ export default function MCQCard({
   currentModule,
   onActivate,
   sessionId,
+  isLastModule,
   respond,
 }: MCQCardProps) {
   const [selected, setSelected] = useState<number | null>(null);
@@ -70,10 +73,34 @@ export default function MCQCard({
     if (active) onActivate(moduleTitle);
   }, [active, moduleTitle, onActivate]);
 
+  // Persist this question's outcome once it's answered correctly. Fire-and-forget:
+  // recording must never block or break the quiz flow.
+  const recordResult = (finalIndex: number) => {
+    void fetch("/api/quiz/result", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId,
+        moduleTitle,
+        questionIndex,
+        total,
+        question,
+        options,
+        correct_index,
+        userAnswerIndex: finalIndex,
+        wrongAttempts: triedWrong.length,
+        wrongOptionIndices: triedWrong,
+        hintsUsed: hints.length,
+        isLastModule: isLastModule ?? false,
+      }),
+    }).catch(() => {});
+  };
+
   const handleSubmit = () => {
     if (selected === null || concluded) return;
     if (selected === correct_index) {
       setConcluded(true);
+      recordResult(selected);
       const answer = LABELS[selected];
       if (respond) setTimeout(() => respond({ answer }), 1800);
       return;

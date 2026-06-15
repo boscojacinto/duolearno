@@ -9,8 +9,20 @@ import type { z } from "zod";
 import type { AnalyzeOutputSchema } from "./agents/analyze/steps";
 import type { LearnOutputSchema } from "./agents/learn/steps";
 import { EMPTY_QUIZ_STATE } from "./agents/learn/steps";
+import {
+  saveAnalysis,
+  createQuizSession,
+  saveModuleResults,
+  analysisExists,
+} from "./store/records-store";
 import type { ModuleResult } from "./types/learning-loop";
-import type { LearningPath, DocumentMetadata, Item } from "./types/prerequisite-graph";
+import type {
+  LearningPath,
+  DocumentMetadata,
+  Item,
+  Edge,
+  AssumedPrerequisite,
+} from "./types/prerequisite-graph";
 
 async function promptUser(question: string): Promise<string> {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -150,7 +162,34 @@ program
         process.exit(1);
       }
 
-      const fullOutput = { ...finalOutput, learning_path: learningPath };
+      // Persist the analysis to Postgres (durable system of record) and embed
+      // its id in the output so a later `learn` run links its results back to
+      // this analysis. Best-effort: a DB failure must not lose the JSON output.
+      let analysisId: string | undefined;
+      if (learningPath) {
+        try {
+          analysisId = await saveAnalysis({
+            documentMetadata: finalOutput.document_metadata,
+            items: finalOutput.items,
+            edges: finalOutput.edges,
+            assumedPrerequisites: finalOutput.prerequisites_assumed,
+            clusters: finalOutput.clusters,
+            learningPath,
+            sourceFilename: path.basename(pdfPath),
+          });
+        } catch (e) {
+          console.warn(
+            "[duolearno] Could not persist analysis to Postgres:",
+            e instanceof Error ? e.message : e
+          );
+        }
+      }
+
+      const fullOutput = {
+        ...finalOutput,
+        learning_path: learningPath,
+        ...(analysisId ? { analysis_id: analysisId } : {}),
+      };
       const json = options.pretty ? JSON.stringify(fullOutput, null, 2) : JSON.stringify(fullOutput);
       fs.writeFileSync(outputPath, json, "utf-8");
 
@@ -164,6 +203,7 @@ program
         console.log(`  Total study time : ${learningPath.total_estimated_minutes} min`);
       }
       console.log(`  Output           : ${outputPath}`);
+      if (analysisId) console.log(`  Analysis ID      : ${analysisId}`);
     }
   );
 
@@ -244,6 +284,37 @@ program
 
     const learnResult = result.result as z.infer<typeof LearnOutputSchema>;
     printFinalSummary(learnResult.moduleResults, learnResult.learningPath);
+
+    // Persist the run to Postgres: reuse the analysis row if the input JSON
+    // carries an analysis_id from `analyze`, otherwise create one from the
+    // input. Best-effort — never fail the session over a DB error.
+    try {
+      let analysisId =
+        typeof rawJson.analysis_id === "string" ? (rawJson.analysis_id as string) : undefined;
+      if (!analysisId || !(await analysisExists(analysisId))) {
+        analysisId = await saveAnalysis({
+          documentMetadata,
+          items,
+          edges: (rawJson.edges as Edge[] | undefined) ?? [],
+          assumedPrerequisites: (rawJson.prerequisites_assumed as AssumedPrerequisite[] | undefined) ?? [],
+          clusters: (rawJson.clusters as unknown[] | undefined) ?? [],
+          learningPath,
+          sourceFilename: path.basename(inputPath),
+        });
+      }
+      const sessionId = await createQuizSession({
+        analysisId,
+        title: learningPath.title,
+        source: "cli",
+      });
+      await saveModuleResults(sessionId, learnResult.moduleResults);
+      console.log(`  Saved results to Postgres (session ${sessionId}).\n`);
+    } catch (e) {
+      console.warn(
+        "[duolearno] Could not persist quiz results:",
+        e instanceof Error ? e.message : e
+      );
+    }
   });
 
 program.parse(process.argv);

@@ -53,6 +53,10 @@ export default function Page() {
   sessionIdRef.current = quizData?.sessionId ?? "";
   const currentModuleRef = useRef<string | null>(null);
   currentModuleRef.current = currentModule;
+  // Live learning path for the render closure — used to flag the last module so
+  // the result endpoint can mark the session complete.
+  const learningPathRef = useRef<QuizData["learningPath"] | null>(null);
+  learningPathRef.current = quizData?.learningPath ?? null;
 
   // Share quiz data with the CopilotKit agent
   useAgentContext({
@@ -76,6 +80,9 @@ export default function Page() {
     render: ({ status, args, respond }) => {
       // Args still streaming — nothing to show yet.
       if (status === "inProgress") return <></>;
+      const lp = learningPathRef.current;
+      const moduleIdx = lp ? lp.modules.findIndex((m) => m.title === args.moduleTitle) : -1;
+      const isLastModule = moduleIdx >= 0 && moduleIdx === lp!.modules.length - 1;
       // Render both the live question (executing) and the answered one
       // (complete) so the correct answer stays visible for every question.
       return (
@@ -91,6 +98,7 @@ export default function Page() {
           currentModule={currentModuleRef.current}
           onActivate={setCurrentModule}
           sessionId={sessionIdRef.current}
+          isLastModule={isLastModule}
           respond={respond}
         />
       );
