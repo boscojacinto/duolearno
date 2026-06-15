@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-DuoLearno is an AI learning agent that transforms a PDF into an interactive lesson. It is built in phases; this repo currently contains **Phase 1 (analysis + learning path), Phase 2 (HITL approval gate), and Phase 3 (interactive learning loop)**.
+DuoLearno is an AI learning agent that transforms a PDF into an interactive lesson. It is built in phases; this repo currently contains **Phase 1 (analysis + learning path), Phase 2 (HITL approval gate), Phase 3 (interactive learning loop), and Phase 4 (performance summary + study tips)**.
 
 ## Commands
 
@@ -69,19 +69,28 @@ init-quiz → [dountil: quiz (suspend per question)] → summary
 
 **MCQ format**: Each MCQ has `question`, 4 `options` (plain strings), `correct_index` (0–3), and `explanation`. The question count per module is `min(6, len(learning_objectives) + 1)`, minimum 3.
 
+### Phase 4: Performance Summary & Study Tips
+
+After a quiz completes, DuoLearno generates a personalized, **graph-grounded** performance summary with study tips and persists it.
+
+- **Generator**: `generatePerformanceSummary()` in `src/agents/learn/steps.ts` (exported, like `generateMcqs`/`generateHint`). Computes overall accuracy and per-module scores deterministically in code; for modules below 80% it resolves their prerequisite concepts from the analysis graph via the shared `resolvePrerequisiteConcepts()` helper (extracted from the hint logic — an edge A→B means A is a prerequisite of B), and the LLM (`generateObject` + `PerformanceTipsSchema`) writes only the prose. Returns a `PerformanceSummary` (computed numbers + graph-grounded `focus_areas` + LLM prose). Prompt: `PERFORMANCE_SUMMARY_SYSTEM_PROMPT` / `buildPerformanceSummaryPrompt` in `src/agents/learn/prompts.ts`.
+- **Persistence**: stored in `quiz_sessions.summary` (jsonb). Read/written via `getSessionForSummary()` / `saveSessionSummary()` in `src/store/records-store.ts`. `getSessionForSummary` joins the session to its analysis and rebuilds `ModuleResult[]` from the recorded rows.
+- **CLI**: after the score table, the `learn` command generates, prints (`printPerformanceSummary`), and persists the summary — best-effort.
+- **Web**: the quiz agent calls the `present_summary` server tool (in the CopilotKit route) once all modules are done; it returns the stored summary or generates+saves one, and `page.tsx` renders it via `useRenderTool` into `PerformanceSummaryCard`.
+
 ### Key files
 
 - `src/types/prerequisite-graph.ts` — Zod schemas and TypeScript types for all data structures; single source of truth for the analyze output JSON shape.
-- `src/types/learning-loop.ts` — MCQ, QuestionResult, ModuleResult schemas and types.
+- `src/types/learning-loop.ts` — MCQ, QuestionResult, ModuleResult, and PerformanceSummary schemas and types.
 - `src/agents/analyze/prompts.ts` — All LLM prompt builders for Phase 1+2; edit here to tune extraction quality.
 - `src/agents/analyze/steps.ts` — Seven `createStep` definitions; accumulated pass-through schemas; `humanApprovalStep` with `suspendSchema`/`resumeSchema`.
 - `src/agents/analyze/workflow.ts` — Wires the 7 analyze steps with `.then()` chain and `.commit()`.
-- `src/agents/learn/prompts.ts` — MCQ generation prompt builder.
-- `src/agents/learn/steps.ts` — `initQuizStep`, `quizStep` (suspend/resume + evaluation), `summaryStep`; `QuizStateSchema` shared state.
+- `src/agents/learn/prompts.ts` — MCQ, hint, and performance-summary prompt builders.
+- `src/agents/learn/steps.ts` — `initQuizStep`, `quizStep`, `summaryStep`; `QuizStateSchema`; and exported generators `generateMcqs`, `generateHint`, `generatePerformanceSummary` (+ shared `resolvePrerequisiteConcepts`).
 - `src/agents/learn/workflow.ts` — Wires learn steps: `.then(init).dountil(quiz, condition).then(summary).commit()`.
 - `src/mastra.ts` — `Mastra` instance registering both workflows; Redis-backed workflow-run storage.
 - `src/store/server-store.ts` — Redis-backed short-lived quiz-session memory (graph for hints/MCQs, 24h TTL).
-- `src/store/records-store.ts` — PostgreSQL (`pg`) durable application records: analyses, quiz sessions, per-module and per-question results. Lazily creates its schema on first connect.
+- `src/store/records-store.ts` — PostgreSQL (`pg`) durable application records: analyses, quiz sessions (incl. the Phase 4 `summary` jsonb), per-module and per-question results. Lazily creates its schema on first connect (incl. an idempotent `ALTER` to add `summary` to pre-existing DBs).
 - `db/schema.sql` — Canonical reference DDL for the Postgres tables (the app auto-creates them too).
 - `src/tools/pdf-extractor.ts` — Thin wrapper around `pdf-parse`; returns text, page count, and PDF metadata.
 - `src/index.ts` — `commander` CLI entry point (`analyze` and `learn` commands).
@@ -104,6 +113,6 @@ const { object } = await generateObject({ model: gemini, schema: ZodSchema, syst
 Two stores back the app (both required via env):
 
 - **Redis** (`REDIS_URL`) — Mastra workflow-run snapshots (`src/mastra.ts`, so suspended HITL runs resume by `runId` across restarts/instances) and short-lived quiz-session memory (`src/store/server-store.ts`, 24h TTL, carries the analyze-phase graph for hints/MCQs).
-- **PostgreSQL** (`DATABASE_URL`) — durable system of record (`src/store/records-store.ts`): `analyses` (graph + learning path per PDF), `quiz_sessions`, `module_results`, `question_results`. Tables are created automatically on first connection; `db/schema.sql` is the canonical reference DDL.
+- **PostgreSQL** (`DATABASE_URL`) — durable system of record (`src/store/records-store.ts`): `analyses` (graph + learning path per PDF), `quiz_sessions` (incl. the Phase 4 `summary` jsonb), `module_results`, `question_results`. Tables are created automatically on first connection; `db/schema.sql` is the canonical reference DDL.
 
 Result recording is best-effort everywhere — a Postgres failure logs an error but never breaks a quiz or loses the CLI's JSON output. The web quiz records each concluded question via `POST /api/quiz/result` (resolving `module_id` from the Redis session, rolling totals into `module_results`/`quiz_sessions`, marking the session complete on the last module's last question). The `analyze` CLI persists the analysis and embeds its `analysis_id` in the output JSON; the `learn` CLI reuses that id (or recreates the analysis) and writes the full run via `saveModuleResults`.

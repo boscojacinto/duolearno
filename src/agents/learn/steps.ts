@@ -12,8 +12,16 @@ import {
   MCQSetSchema,
   QuestionResultSchema,
   ModuleResultSchema,
+  PerformanceTipsSchema,
 } from "../../types/learning-loop";
-import type { MCQ, MCQSet, QuestionResult, ModuleResult } from "../../types/learning-loop";
+import type {
+  MCQ,
+  MCQSet,
+  QuestionResult,
+  ModuleResult,
+  PerformanceTips,
+  PerformanceSummary,
+} from "../../types/learning-loop";
 import type {
   LearningPath,
   LearningModule,
@@ -22,7 +30,14 @@ import type {
   AssumedPrerequisite,
   DocumentMetadata,
 } from "../../types/prerequisite-graph";
-import { MCQ_SYSTEM_PROMPT, buildMCQPrompt, HINT_SYSTEM_PROMPT, buildHintPrompt } from "./prompts";
+import {
+  MCQ_SYSTEM_PROMPT,
+  buildMCQPrompt,
+  HINT_SYSTEM_PROMPT,
+  buildHintPrompt,
+  PERFORMANCE_SUMMARY_SYSTEM_PROMPT,
+  buildPerformanceSummaryPrompt,
+} from "./prompts";
 
 const googleAI = createGoogleGenerativeAI({ apiKey: process.env.GEMINI_API_KEY! });
 const gemini = googleAI("gemini-3.1-flash-lite");
@@ -125,6 +140,45 @@ export async function generateMcqs(
 
 const LETTERS = ["A", "B", "C", "D"];
 
+export interface PrerequisiteConcept {
+  id: string;
+  label: string;
+  description: string;
+  assumed: boolean;
+}
+
+/**
+ * Resolve the prerequisite concepts a set of module concepts builds on. An edge
+ * A → B means A must be understood before B, so the prerequisites of the module's
+ * concepts are the `from` ends of edges that point into them from outside the
+ * module. Each id is resolved to a real item, or to an assumed prerequisite.
+ * Shared by the hint generator and the performance-summary generator.
+ */
+export function resolvePrerequisiteConcepts(
+  moduleItemIds: Iterable<string>,
+  items: Item[],
+  edges: Edge[],
+  assumedPrerequisites: AssumedPrerequisite[] = []
+): PrerequisiteConcept[] {
+  const idSet = new Set(moduleItemIds);
+  const prereqIds = new Set<string>();
+  for (const edge of edges) {
+    if (idSet.has(edge.to) && !idSet.has(edge.from)) prereqIds.add(edge.from);
+  }
+  const itemById = new Map(items.map((it) => [it.id, it] as const));
+  const assumedById = new Map(assumedPrerequisites.map((a) => [a.id, a] as const));
+  const out: PrerequisiteConcept[] = [];
+  for (const id of prereqIds) {
+    const it = itemById.get(id);
+    if (it) out.push({ id, label: it.label, description: it.description, assumed: false });
+    else {
+      const a = assumedById.get(id);
+      if (a) out.push({ id, label: a.label, description: a.description, assumed: true });
+    }
+  }
+  return out;
+}
+
 /**
  * Generate the next hint for a wrongly-answered question. Hints are built on the
  * prerequisite graph from the analyze phase: the question's module concepts and
@@ -148,23 +202,9 @@ export async function generateHint(params: {
   const moduleItemIds = new Set(module?.item_ids ?? []);
   const testedItems = items.filter((it) => moduleItemIds.has(it.id));
 
-  // Prerequisites: an edge A → B means A must be understood before B, so the
-  // prerequisites of a tested concept are the `from` ends of edges into it.
-  const prereqIds = new Set<string>();
-  for (const edge of edges) {
-    if (moduleItemIds.has(edge.to) && !moduleItemIds.has(edge.from)) prereqIds.add(edge.from);
-  }
-  const itemById = new Map(items.map((it) => [it.id, it] as const));
-  const assumedById = new Map(assumedPrerequisites.map((a) => [a.id, a] as const));
-  const prereqLines: string[] = [];
-  for (const id of prereqIds) {
-    const it = itemById.get(id);
-    if (it) prereqLines.push(`- ${it.label}: ${it.description}`);
-    else {
-      const a = assumedById.get(id);
-      if (a) prereqLines.push(`- ${a.label} (assumed): ${a.description}`);
-    }
-  }
+  const prereqLines = resolvePrerequisiteConcepts(moduleItemIds, items, edges, assumedPrerequisites).map(
+    (p) => `- ${p.label}${p.assumed ? " (assumed)" : ""}: ${p.description}`
+  );
 
   const testedConcepts = testedItems.map((it) => `- [${it.type}] ${it.label}: ${it.description}`).join("\n");
   const optionsLabeled = options.map((o, i) => `${LETTERS[i]}) ${o}`).join("\n");
@@ -184,6 +224,94 @@ export async function generateHint(params: {
   });
 
   return text.trim();
+}
+
+// ── Performance summary + study tips (Phase 4) ───────────────────────────────
+
+const FOCUS_THRESHOLD_PCT = 80;
+
+/**
+ * Build a personalized performance summary from a completed quiz's results.
+ * Scores are computed deterministically here; for modules below the focus
+ * threshold the prerequisite concepts are resolved from the analysis graph (same
+ * grounding as hints) and the LLM writes the prose, leaning on those concepts.
+ */
+export async function generatePerformanceSummary(params: {
+  moduleResults: ModuleResult[];
+  learningPath: LearningPath;
+  items: Item[];
+  edges: Edge[];
+  assumedPrerequisites?: AssumedPrerequisite[];
+}): Promise<PerformanceSummary> {
+  const { moduleResults, learningPath, items, edges, assumedPrerequisites = [] } = params;
+
+  const totalQuestions = moduleResults.reduce((s, m) => s + m.total_questions, 0);
+  const correctAnswers = moduleResults.reduce((s, m) => s + m.correct_answers, 0);
+  const accuracyPct = totalQuestions > 0 ? Math.round((correctAnswers / totalQuestions) * 100) : 0;
+
+  const pct = (m: ModuleResult) =>
+    m.total_questions > 0 ? Math.round((m.correct_answers / m.total_questions) * 100) : 0;
+
+  const moduleById = new Map(learningPath.modules.map((m) => [m.module_id, m] as const));
+
+  // Weak modules + their graph-resolved prerequisite concepts.
+  const focusAreas = moduleResults
+    .filter((m) => pct(m) < FOCUS_THRESHOLD_PCT)
+    .map((m) => {
+      const mod = moduleById.get(m.module_id);
+      const prereqs = mod
+        ? resolvePrerequisiteConcepts(mod.item_ids, items, edges, assumedPrerequisites)
+        : [];
+      return { moduleResult: m, scorePct: pct(m), prerequisites: prereqs };
+    });
+
+  const { object } = await generateObject({
+    model: gemini,
+    schema: PerformanceTipsSchema,
+    system: PERFORMANCE_SUMMARY_SYSTEM_PROMPT,
+    prompt: buildPerformanceSummaryPrompt({
+      pathTitle: learningPath.title,
+      fromLevel: learningPath.from_level,
+      toLevel: learningPath.to_level,
+      accuracyPct,
+      totalQuestions,
+      correctAnswers,
+      moduleScores: moduleResults.map((m) => ({
+        title: m.module_title,
+        scorePct: pct(m),
+        correct: m.correct_answers,
+        total: m.total_questions,
+      })),
+      focusAreas: focusAreas.map((f) => ({
+        title: f.moduleResult.module_title,
+        scorePct: f.scorePct,
+        prerequisites: f.prerequisites.map((p) => ({
+          label: p.label,
+          description: p.description,
+          assumed: p.assumed,
+        })),
+      })),
+    }),
+  });
+
+  const tips = object as PerformanceTips;
+  const tipByModule = new Map(tips.focus_area_tips.map((t) => [t.module_title, t.tip] as const));
+
+  return {
+    headline: tips.headline,
+    accuracy_pct: accuracyPct,
+    total_questions: totalQuestions,
+    correct_answers: correctAnswers,
+    strengths: tips.strengths,
+    focus_areas: focusAreas.map((f) => ({
+      module_title: f.moduleResult.module_title,
+      score_pct: f.scorePct,
+      prerequisite_concepts: f.prerequisites.map((p) => p.label),
+      tip: tipByModule.get(f.moduleResult.module_title) ?? "",
+    })),
+    study_tips: tips.study_tips,
+    next_steps: tips.next_steps,
+  };
 }
 
 // ── Steps ────────────────────────────────────────────────────────────────────

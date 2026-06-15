@@ -7,7 +7,7 @@ import type {
   LearningPath,
   DocumentMetadata,
 } from "../types/prerequisite-graph";
-import type { ModuleResult } from "../types/learning-loop";
+import type { ModuleResult, QuestionResult, PerformanceSummary } from "../types/learning-loop";
 
 // PostgreSQL backs the durable application records: every PDF analysis, each
 // quiz session, and the per-module / per-question results. (Redis still backs
@@ -68,7 +68,8 @@ CREATE TABLE IF NOT EXISTS quiz_sessions (
   total_questions int  NOT NULL DEFAULT 0,
   correct_answers int  NOT NULL DEFAULT 0,
   started_at      timestamptz NOT NULL DEFAULT now(),
-  finished_at     timestamptz
+  finished_at     timestamptz,
+  summary         jsonb
 );
 
 CREATE TABLE IF NOT EXISTS module_results (
@@ -102,6 +103,10 @@ CREATE TABLE IF NOT EXISTS question_results (
 CREATE INDEX IF NOT EXISTS idx_quiz_sessions_analysis ON quiz_sessions(analysis_id);
 CREATE INDEX IF NOT EXISTS idx_module_results_session ON module_results(session_id);
 CREATE INDEX IF NOT EXISTS idx_question_results_session ON question_results(session_id);
+
+-- Migration for DBs created before the Phase 4 summary column existed
+-- (CREATE TABLE IF NOT EXISTS above won't alter an existing table).
+ALTER TABLE quiz_sessions ADD COLUMN IF NOT EXISTS summary jsonb;
 `;
 
 async function getPool(): Promise<Pool> {
@@ -195,6 +200,96 @@ export async function markSessionComplete(sessionId: string): Promise<void> {
       WHERE id = $1`,
     [sessionId]
   );
+}
+
+// ── Phase 4: performance summary read/write ───────────────────────────────────
+
+export interface SessionForSummary {
+  moduleResults: ModuleResult[];
+  items: Item[];
+  edges: Edge[];
+  assumedPrerequisites: AssumedPrerequisite[];
+  learningPath: LearningPath;
+  existingSummary: PerformanceSummary | null;
+}
+
+/**
+ * Load everything needed to generate (or re-show) a session's performance
+ * summary: the recorded results plus the analysis graph they were generated
+ * from. Returns undefined if the session (or its analysis) is missing.
+ */
+export async function getSessionForSummary(
+  sessionId: string
+): Promise<SessionForSummary | undefined> {
+  if (!sessionId) return undefined;
+  const pool = await getPool();
+
+  const session = await pool.query(
+    `SELECT s.summary, a.items, a.edges, a.assumed_prerequisites, a.learning_path
+       FROM quiz_sessions s
+       JOIN analyses a ON a.id = s.analysis_id
+      WHERE s.id = $1`,
+    [sessionId]
+  );
+  if (session.rowCount === 0) return undefined;
+  const row = session.rows[0];
+
+  const mods = await pool.query(
+    `SELECT module_id, module_title, total_questions, correct_answers
+       FROM module_results
+      WHERE session_id = $1
+      ORDER BY module_id`,
+    [sessionId]
+  );
+  const questions = await pool.query(
+    `SELECT module_id, question, correct_index, user_answer_index, is_correct
+       FROM question_results
+      WHERE session_id = $1
+      ORDER BY module_id, question_index`,
+    [sessionId]
+  );
+
+  // Group recorded questions back under their module to rebuild ModuleResult[].
+  const byModule = new Map<string, QuestionResult[]>();
+  for (const q of questions.rows) {
+    const list = byModule.get(q.module_id) ?? [];
+    list.push({
+      question: q.question,
+      user_answer_index: q.user_answer_index,
+      correct_index: q.correct_index,
+      is_correct: q.is_correct,
+    });
+    byModule.set(q.module_id, list);
+  }
+
+  const moduleResults: ModuleResult[] = mods.rows.map((m) => ({
+    module_id: m.module_id,
+    module_title: m.module_title,
+    total_questions: m.total_questions,
+    correct_answers: m.correct_answers,
+    question_results: byModule.get(m.module_id) ?? [],
+  }));
+
+  return {
+    moduleResults,
+    items: row.items as Item[],
+    edges: row.edges as Edge[],
+    assumedPrerequisites: (row.assumed_prerequisites ?? []) as AssumedPrerequisite[],
+    learningPath: row.learning_path as LearningPath,
+    existingSummary: (row.summary ?? null) as PerformanceSummary | null,
+  };
+}
+
+export async function saveSessionSummary(
+  sessionId: string,
+  summary: PerformanceSummary
+): Promise<void> {
+  if (!sessionId) return;
+  const pool = await getPool();
+  await pool.query("UPDATE quiz_sessions SET summary = $2 WHERE id = $1", [
+    sessionId,
+    JSON.stringify(summary),
+  ]);
 }
 
 // ── Per-question results (incremental, web flow) ──────────────────────────────

@@ -73,10 +73,11 @@ export default function MCQCard({
     if (active) onActivate(moduleTitle);
   }, [active, moduleTitle, onActivate]);
 
-  // Persist this question's outcome once it's answered correctly. Fire-and-forget:
-  // recording must never block or break the quiz flow.
-  const recordResult = (finalIndex: number) => {
-    void fetch("/api/quiz/result", {
+  // Persist this question's outcome once it's answered correctly. Returns a
+  // promise that always resolves (recording is best-effort — a failure must not
+  // break the quiz, but we still wait for it before letting the agent proceed).
+  const recordResult = (finalIndex: number): Promise<void> => {
+    return fetch("/api/quiz/result", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -93,16 +94,26 @@ export default function MCQCard({
         hintsUsed: hints.length,
         isLastModule: isLastModule ?? false,
       }),
-    }).catch(() => {});
+    })
+      .then(() => undefined)
+      .catch(() => undefined);
   };
 
   const handleSubmit = () => {
     if (selected === null || concluded) return;
     if (selected === correct_index) {
       setConcluded(true);
-      recordResult(selected);
       const answer = LABELS[selected];
-      if (respond) setTimeout(() => respond({ answer }), 1800);
+      // Resolve the human-in-the-loop call only AFTER this result is committed,
+      // so the end-of-quiz summary (which the agent generates from the DB right
+      // after the last answer) can never race ahead of the final record. The
+      // 1.8s "Correct!" delay runs in parallel — we wait for whichever is last.
+      const recorded = recordResult(selected);
+      if (respond) {
+        setTimeout(() => {
+          void recorded.then(() => respond({ answer }));
+        }, 1800);
+      }
       return;
     }
     // Wrong: lock that option, clear the pick, offer a hint + retry. Never reveal.

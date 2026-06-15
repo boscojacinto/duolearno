@@ -32,7 +32,8 @@ CREATE TABLE IF NOT EXISTS quiz_sessions (
   total_questions int  NOT NULL DEFAULT 0,
   correct_answers int  NOT NULL DEFAULT 0,        -- first-attempt correct
   started_at      timestamptz NOT NULL DEFAULT now(),
-  finished_at     timestamptz
+  finished_at     timestamptz,
+  summary         jsonb                              -- Phase 4 performance summary + study tips
 );
 
 CREATE TABLE IF NOT EXISTS module_results (
