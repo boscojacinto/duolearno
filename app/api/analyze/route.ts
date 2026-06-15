@@ -4,7 +4,6 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { randomUUID } from "crypto";
 import { mastra } from "@/src/mastra";
-import { analyzeRuns } from "@/src/store/server-store";
 
 export async function POST(request: NextRequest) {
   const formData = await request.formData();
@@ -33,13 +32,12 @@ export async function POST(request: NextRequest) {
     if (existsSync(tmpPath)) unlinkSync(tmpPath);
 
     if (result.status === "suspended") {
-      const runId = randomUUID();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      analyzeRuns.set(runId, { run: run as any, tmpPath: "" });
+      // The run snapshot is persisted to Redis by Mastra storage; resume later
+      // by its runId (no in-memory handle needed).
       // suspendPayload is keyed by step ID: { "human-approval": { summary } }
       const stepPayload = (result.suspendPayload as Record<string, { summary?: string }>)["human-approval"];
       const summary = stepPayload?.summary ?? "";
-      return NextResponse.json({ runId, summary });
+      return NextResponse.json({ runId: run.runId, summary });
     }
 
     return NextResponse.json({ error: "Unexpected workflow status: " + result.status }, { status: 500 });
