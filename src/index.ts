@@ -78,14 +78,15 @@ function printPerformanceSummary(summary: PerformanceSummary): void {
   }
 
   if (summary.focus_areas.length > 0) {
-    console.log(`\n  Focus areas:`);
+    console.log(`\n  Module breakdown:`);
     for (const f of summary.focus_areas) {
-      console.log(`    ▸ ${f.module_title} (${f.score_pct}%)`);
-      console.log(`      ${f.tip}`);
+      console.log(`    ▸ ${f.module_title} — ${f.correct_answers}/${f.total_questions} (${f.score_pct}%)`);
+      if (f.tip) console.log(`      ${f.tip}`);
       if (f.prerequisite_concepts.length > 0) {
         console.log(`      Revisit: ${f.prerequisite_concepts.join(", ")}`);
       }
     }
+    console.log(`    ── Total: ${summary.correct_answers}/${summary.total_questions} (${summary.accuracy_pct}%)`);
   }
 
   if (summary.study_tips.length > 0) {

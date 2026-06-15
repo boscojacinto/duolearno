@@ -354,18 +354,26 @@ export async function generatePerformanceSummary(params: {
 
   const tips = object as PerformanceTips;
   const tipByModule = new Map(tips.focus_area_tips.map((t) => [t.module_title, t.tip] as const));
+  const prereqByModule = new Map(
+    focusAreas.map((f) => [f.moduleResult.module_title, f.prerequisites.map((p) => p.label)] as const)
+  );
 
+  // Full per-module breakdown — every module is listed so the correct/total
+  // counts sum to the overall score; weak modules also carry a tip + the
+  // prerequisite concepts to revisit.
   return {
     headline: tips.headline,
     accuracy_pct: accuracyPct,
     total_questions: totalQuestions,
     correct_answers: correctAnswers,
     strengths: tips.strengths,
-    focus_areas: focusAreas.map((f) => ({
-      module_title: f.moduleResult.module_title,
-      score_pct: f.scorePct,
-      prerequisite_concepts: f.prerequisites.map((p) => p.label),
-      tip: tipByModule.get(f.moduleResult.module_title) ?? "",
+    focus_areas: moduleResults.map((m) => ({
+      module_title: m.module_title,
+      score_pct: pct(m),
+      correct_answers: m.correct_answers,
+      total_questions: m.total_questions,
+      prerequisite_concepts: prereqByModule.get(m.module_title) ?? [],
+      tip: tipByModule.get(m.module_title) ?? "",
     })),
     study_tips: tips.study_tips,
     next_steps: tips.next_steps,

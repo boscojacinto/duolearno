@@ -43,9 +43,13 @@ export const PerformanceTipsSchema = z.object({
   next_steps: z.string(),
 });
 
+// One module's line in the breakdown. Every module appears (so the counts sum
+// to the overall score); weak modules also carry a tip + prerequisite concepts.
 export const FocusAreaSchema = z.object({
   module_title: z.string(),
   score_pct: z.number().int(),
+  correct_answers: z.number().int(),
+  total_questions: z.number().int(),
   // Graph-grounded foundations to revisit, resolved from the prerequisite edges.
   prerequisite_concepts: z.array(z.string()),
   tip: z.string(),

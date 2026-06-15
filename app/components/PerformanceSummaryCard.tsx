@@ -66,46 +66,68 @@ export default function PerformanceSummaryCard({ summary }: { summary: Performan
 
       {focus_areas.length > 0 && (
         <>
-          <div style={sectionTitle}>Focus Areas</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {focus_areas.map((f, i) => (
-              <div
-                key={i}
-                style={{
-                  padding: "12px 14px",
-                  background: "#fffbeb",
-                  border: "1px solid #fde68a",
-                  borderRadius: 8,
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                  <span style={{ fontWeight: 600, color: "#1a202c", fontSize: 14 }}>{f.module_title}</span>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: scoreColor(f.score_pct) }}>
-                    {f.score_pct}%
-                  </span>
-                </div>
-                <div style={{ fontSize: 13.5, color: "#92400e", lineHeight: 1.6 }}>{f.tip}</div>
-                {f.prerequisite_concepts.length > 0 && (
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
-                    {f.prerequisite_concepts.map((c, j) => (
-                      <span
-                        key={j}
-                        style={{
-                          padding: "2px 10px",
-                          background: "#fff",
-                          border: "1px solid #fcd34d",
-                          borderRadius: 999,
-                          fontSize: 12,
-                          color: "#b45309",
-                        }}
-                      >
-                        {c}
-                      </span>
-                    ))}
+          <div style={sectionTitle}>Module Breakdown</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {focus_areas.map((f, i) => {
+              const weak = f.score_pct < 80;
+              return (
+                <div
+                  key={i}
+                  style={{
+                    padding: "10px 14px",
+                    background: weak ? "#fffbeb" : "#f7fafc",
+                    border: `1px solid ${weak ? "#fde68a" : "#e2e8f0"}`,
+                    borderRadius: 8,
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontWeight: 600, color: "#1a202c", fontSize: 14 }}>{f.module_title}</span>
+                    <span style={{ marginLeft: "auto", fontSize: 13, fontWeight: 700, color: scoreColor(f.score_pct) }}>
+                      {f.correct_answers}/{f.total_questions} · {f.score_pct}%
+                    </span>
                   </div>
-                )}
-              </div>
-            ))}
+                  {f.tip && (
+                    <div style={{ fontSize: 13.5, color: "#92400e", lineHeight: 1.6, marginTop: 6 }}>{f.tip}</div>
+                  )}
+                  {f.prerequisite_concepts.length > 0 && (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+                      {f.prerequisite_concepts.map((c, j) => (
+                        <span
+                          key={j}
+                          style={{
+                            padding: "2px 10px",
+                            background: "#fff",
+                            border: "1px solid #fcd34d",
+                            borderRadius: 999,
+                            fontSize: 12,
+                            color: "#b45309",
+                          }}
+                        >
+                          {c}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {/* Total — confirms the per-module counts add up to the overall score. */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                padding: "8px 14px",
+                borderTop: "1px solid #e2e8f0",
+                fontSize: 13,
+                fontWeight: 700,
+                color: "#2d3748",
+              }}
+            >
+              <span>Total</span>
+              <span style={{ marginLeft: "auto", color: scoreColor(accuracy_pct) }}>
+                {correct_answers}/{total_questions} · {accuracy_pct}%
+              </span>
+            </div>
           </div>
         </>
       )}
