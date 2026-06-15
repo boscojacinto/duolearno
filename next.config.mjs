@@ -1,7 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   experimental: {
-    serverComponentsExternalPackages: ["pdf-parse", "@mastra/core"],
+    serverComponentsExternalPackages: ["pdf-parse", "@mastra/core", "pg"],
   },
 };
 

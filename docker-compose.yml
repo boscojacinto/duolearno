@@ -1,0 +1,46 @@
+# Local dependencies for DuoLearno: PostgreSQL (durable records) and Redis
+# (Mastra run snapshots + quiz-session memory). Values match .env.example.
+#
+#   docker compose up -d        # start both in the background
+#   docker compose ps           # check health
+#   docker compose logs -f      # tail logs
+#   docker compose down         # stop (data persists in named volumes)
+#   docker compose down -v      # stop and wipe data
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: duolearno-pg
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: duolearno
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Reference schema is applied on first boot (the app also auto-creates the
+      # tables with IF NOT EXISTS, so this is just a convenience).
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d duolearno"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: duolearno-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
+  redisdata:

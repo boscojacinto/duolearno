@@ -14,6 +14,8 @@ export interface QuizSessionEntry {
   edges: Edge[];
   assumedPrerequisites: AssumedPrerequisite[];
   learningPath: LearningPath;
+  // Postgres analysis id this session was generated from (when persisted).
+  analysisId?: string;
 }
 
 const REDIS_URL = process.env.REDIS_URL;
