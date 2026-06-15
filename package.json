@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "tsx src/index.ts",
     "dev:web": "next dev",
+    "dev:web:turbo": "next dev --turbo",
     "build": "tsc -p tsconfig.cli.json",
     "build:web": "next build",
     "start": "node dist/index.js",
