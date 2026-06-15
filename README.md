@@ -15,8 +15,8 @@ The agent runs in phases:
 |-------|--------------|
 | **1 — Analysis** | Extracts the PDF, identifies the domain, pulls out atomic concepts/skills, builds a directed prerequisite graph, and generates a sequenced learning path (modules, objectives, milestones). |
 | **2 — Approval (HITL)** | Pauses and shows you a **learning-plan summary** plus a **quiz plan** (MCQ cadence: logic, difficulty progression, milestone checkpoints) to approve before anything is finalized. |
-| **3 — Interactive quiz** | Quizzes you on every module with multiple-choice questions. Wrong answers get **graph-grounded hints** (built on prerequisite concepts) and let you retry — the answer is never revealed. |
-| **4 — Performance summary** | Generates a personalized summary with strengths, focus areas, and study tips, grounding weak-area advice in the specific prerequisite concepts to revisit. |
+| **3 — Interactive quiz** | Quizzes you on every module with multiple-choice questions. Wrong answers get **graph-grounded hints** (built on prerequisite concepts), an optional **in-card tutor chat** to discuss the topic and learn more, and a retry — the answer is never revealed. |
+| **4 — Performance summary** | Generates a personalized summary with a **full per-module breakdown** (every module's score, summing to the overall), strengths, focus areas, and study tips — grounding weak-area advice in the specific prerequisite concepts to revisit. |
 
 ## Stack
 
@@ -66,8 +66,8 @@ npm run dev:web:turbo    # same, with Turbopack (faster compiles)
 ```
 
 Upload a PDF → watch the analysis steps stream live → review the learning plan
-and quiz plan → take the quiz (with hints and retries) → get your performance
-summary.
+and quiz plan → take the quiz (with hints, a wrong-answer tutor chat, and
+retries) → get your performance summary with a per-module breakdown.
 
 ### CLI
 
